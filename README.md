@@ -1,41 +1,46 @@
-# Hotel WhatsApp Bot — Owner Guide
+# Бот для WhatsApp — Руководство для владельца
 
-This bot automatically answers guest questions on WhatsApp so you don't have to reply to every message.
+> **Контакт разработчика:** [Имя / телефон / email — заполнить]
 
-## What the bot does automatically
-- Answers questions about prices, check-in/out time, directions, amenities
-- Collects booking requests (name, dates, number of guests)
-- Sends you a WhatsApp notification when someone wants to book
+Этот бот автоматически отвечает на вопросы гостей в WhatsApp, чтобы вам не приходилось отвечать на каждое сообщение вручную.
 
-## What you still do
-- Confirm the booking by replying to the guest
-- Send the payment QR code to the guest
-- Answer anything the bot can't handle (it will say "I'll check with the administrator")
+## Что бот делает автоматически
+- Отвечает на вопросы о ценах, заезде/выезде, удобствах, как добраться
+- Собирает заявки на бронирование (имя, даты, количество гостей)
+- Отправляет вам уведомление в WhatsApp, когда гость хочет забронировать
+- Автоматически отвечает на кыргызском языке, если гость пишет по-кыргызски
+- Автоматически отвечает на английском языке, если гость пишет по-английски
 
-## How to update hotel information
-1. Open the file `system-prompt.txt` in any text editor
-2. Change the information between the `[ ]` brackets
-3. In n8n → open "Hotel WhatsApp Bot" workflow → click "Claude — FAQ Reply" node → paste the updated system-prompt.txt content into "System Prompt" → do the same for "Claude — Booking Intake" → save → workflow stays active
+## Что вы по-прежнему делаете сами
+- Подтверждаете бронирование, связываясь с гостем
+- Отправляете QR-код или реквизиты для оплаты
+- Отвечаете на вопросы, которые бот не может решить (он напишет "уточню у администратора")
 
-## If the bot stops responding
-1. Go to your n8n URL (saved in docs/meta-setup.md)
-2. Log in with your email and password
-3. Check "Executions" tab — it shows the last messages received and any errors
-4. If the workflow shows "Inactive" — click the toggle to activate it
+## Как обновить информацию об отеле
+1. Откройте файл `system-prompt.txt` в любом текстовом редакторе
+2. Замените текст в `[СКОБКАХ]` на реальные данные вашего отеля (цены, адрес, описание)
+3. Сохраните файл
+4. Откройте n8n по вашей ссылке и войдите в аккаунт
+5. Откройте workflow "Hotel WhatsApp Bot"
+6. Нажмите на узел "Claude — FAQ Reply"
+7. Удалите старый текст в поле "System Prompt" и вставьте содержимое обновлённого `system-prompt.txt`
+8. Нажмите на узел "Claude — Booking Intake"
+9. Сделайте то же самое — удалите старый текст и вставьте обновлённый
+10. Сохраните workflow (Ctrl+S или кнопка сохранения)
 
-## Monthly costs
-- n8n hosting (PikaPods): ~$5–7/month (charged to your card)
-- AI (Anthropic Claude): ~$1–2/month (check usage at https://console.anthropic.com)
-- WhatsApp: free for messages guests send to you
+## Если бот перестал отвечать
+1. Откройте n8n по вашей ссылке
+2. Войдите в аккаунт
+3. Проверьте вкладку "Executions" — там видны последние сообщения и ошибки
+4. Если workflow показывает "Inactive" — нажмите на переключатель чтобы активировать
 
-## Files in this project
-- `system-prompt.txt` — the bot's instructions and hotel information (edit this to update the bot)
-- `test-messages.txt` — test script to verify the bot is working correctly
-- `n8n-workflow.json` — the bot workflow (import into n8n if you need to restore it)
-- `docs/meta-setup.md` — step-by-step guide for the WhatsApp Business API setup
+## Ежемесячные расходы
+- Хостинг n8n (PikaPods): ~$5–7/месяц (списывается с карты)
+- ИИ (Anthropic Claude): ~$1–2/месяц (проверить на https://console.anthropic.com)
+- WhatsApp: бесплатно для входящих сообщений от гостей
 
-## Contact for technical help
-[Developer contact — fill in]
-
-## Phase 2: Voice calls (future)
-When ready to handle phone calls automatically, see the Phase 2 section in the implementation plan.
+## Файлы проекта
+- `system-prompt.txt` — инструкции для бота и информация об отеле (редактируйте этот файл для обновления бота)
+- `test-messages.txt` — тест-скрипт для проверки что бот работает правильно
+- `n8n-workflow.json` — workflow бота (импортируйте в n8n если нужно восстановить)
+- `docs/meta-setup.md` — пошаговая инструкция по настройке WhatsApp Business API
