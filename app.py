@@ -63,6 +63,7 @@ def whatsapp_verify():
 
 
 def _process_whatsapp(payload: dict, phone: str, text: str, message_id: str) -> None:
+    text = text[:1000]
     t0 = time.monotonic()
     phone_hash = _hash_phone(phone)
     try:

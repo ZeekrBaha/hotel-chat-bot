@@ -24,6 +24,8 @@ def parse_inbound(payload: dict) -> tuple[str, str, str] | None:
         message = payload["entry"][0]["changes"][0]["value"]["messages"][0]
         if message["type"] != "text":
             return None
+        if "@g.us" in message.get("from", ""):
+            return None
         return message["from"], message["text"]["body"], message["id"]
     except (KeyError, IndexError):
         return None

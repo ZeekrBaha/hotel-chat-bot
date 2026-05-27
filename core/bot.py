@@ -1,3 +1,4 @@
+import datetime
 import functools
 import json
 import logging
@@ -53,6 +54,10 @@ def get_system_prompt() -> str:
         return f.read()
 
 
+def _today() -> str:
+    return datetime.date.today().strftime("%d.%m.%Y")
+
+
 def is_booking_intent(message_text: str) -> bool:
     text_lower = message_text.lower()
     return any(kw in text_lower for kw in BOOKING_KEYWORDS)
@@ -64,12 +69,13 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
 
     client = _get_openai_client()
     t0 = time.monotonic()
+    system_prompt = f"Сегодня: {_today()}\n\n{get_system_prompt()}"
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=400,
         response_format=_RESPONSE_FORMAT,
         messages=[
-            {"role": "system", "content": get_system_prompt()},
+            {"role": "system", "content": system_prompt},
             *history[-CONTEXT_WINDOW:],
         ],
     )

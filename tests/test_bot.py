@@ -54,7 +54,8 @@ def test_handle_message_calls_openai_with_system_prompt_and_history():
     call_kwargs = mock_openai.chat.completions.create.call_args.kwargs
     assert call_kwargs["model"] == "gpt-4o-mini"
     assert call_kwargs["max_tokens"] == 400
-    assert call_kwargs["messages"][0] == {"role": "system", "content": FAKE_PROMPT}
+    assert call_kwargs["messages"][0]["role"] == "system"
+    assert FAKE_PROMPT in call_kwargs["messages"][0]["content"]
     assert result["reply"] == FAKE_REPLY
 
 
@@ -140,6 +141,22 @@ def test_openai_client_configured_with_timeout_and_retries():
         max_retries=2,
     )
     bot_module._openai_client = None
+
+
+def test_handle_message_injects_todays_date_in_system_prompt():
+    mock_openai = MagicMock()
+    mock_openai.chat.completions.create.return_value = _mock_structured_response(FAKE_REPLY, False)
+
+    with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
+         patch("core.bot.db.get_history", return_value=[]), \
+         patch("core.bot.db.save_history"), \
+         patch("core.bot._get_openai_client", return_value=mock_openai), \
+         patch("core.bot._today", return_value="27.05.2026"):
+        handle_message("whatsapp", "79991234567", "Добрый день")
+
+    system_content = mock_openai.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert "Сегодня: 27.05.2026" in system_content
+    assert FAKE_PROMPT in system_content
 
 
 def test_get_system_prompt_is_cached():

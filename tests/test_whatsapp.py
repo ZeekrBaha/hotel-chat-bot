@@ -117,3 +117,21 @@ def test_is_duplicate_different_ids_not_duplicate():
     wa_module._seen_message_ids.clear()
     is_duplicate("wamid.a")
     assert is_duplicate("wamid.b") is False
+
+
+def test_parse_inbound_skips_group_message():
+    group_payload = {
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "messages": [{
+                        "id": "wamid.group1",
+                        "from": "120363123456789@g.us",
+                        "type": "text",
+                        "text": {"body": "Hello group"},
+                    }]
+                }
+            }]
+        }]
+    }
+    assert parse_inbound(group_payload) is None

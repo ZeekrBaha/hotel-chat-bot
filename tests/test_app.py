@@ -184,6 +184,26 @@ def test_whatsapp_inbound_returns_200_for_non_text_message(client):
     mock_bot.assert_not_called()
 
 
+def test_whatsapp_inbound_caps_message_at_1000_chars(client):
+    import platforms.whatsapp as wa_module
+    wa_module._seen_message_ids.clear()
+
+    long_text = "а" * 1500
+    payload = json.dumps(_inbound_payload(text=long_text, msg_id="wamid.cap1")).encode()
+    sig = _sign(payload, "test-app-secret")
+
+    with patch("app.Thread", _SyncThread), \
+         patch("app.bot.handle_message", return_value=_bot_result("reply")) as mock_bot, \
+         patch("app.whatsapp.send_reply"):
+        client.post("/whatsapp/webhook", data=payload,
+                    content_type="application/json",
+                    headers={"X-Hub-Signature-256": sig})
+
+    actual_text = mock_bot.call_args.args[2]
+    assert len(actual_text) == 1000
+    assert actual_text == "а" * 1000
+
+
 def test_health_deep_returns_200_when_all_healthy(client):
     with patch("app.db.get_client"), \
          patch("app.bot._get_openai_client"):
