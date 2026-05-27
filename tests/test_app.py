@@ -184,6 +184,27 @@ def test_whatsapp_inbound_returns_200_for_non_text_message(client):
     mock_bot.assert_not_called()
 
 
+def test_health_deep_returns_200_when_all_healthy(client):
+    with patch("app.db.get_client"), \
+         patch("app.bot._get_openai_client"):
+        response = client.get("/health/deep")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "ok"
+    assert data["checks"]["supabase"] == "ok"
+    assert data["checks"]["openai"] == "ok"
+
+
+def test_health_deep_returns_503_when_supabase_fails(client):
+    with patch("app.db.get_client", side_effect=Exception("connection refused")), \
+         patch("app.bot._get_openai_client"):
+        response = client.get("/health/deep")
+    assert response.status_code == 503
+    data = response.get_json()
+    assert data["status"] == "degraded"
+    assert "connection refused" in data["checks"]["supabase"]
+
+
 def test_whatsapp_inbound_deduplicates_retried_message(client):
     import platforms.whatsapp as wa_module
     wa_module._seen_message_ids.clear()

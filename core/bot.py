@@ -1,5 +1,8 @@
+import functools
 import json
+import logging
 import os
+import time
 from openai import OpenAI
 from core import db
 
@@ -8,7 +11,7 @@ BOOKING_KEYWORDS = [
     "book", "reserve", "бронирование",
 ]
 CONTEXT_WINDOW = 10
-
+_logger = logging.getLogger(__name__)
 _openai_client: OpenAI | None = None
 
 _RESPONSE_FORMAT = {
@@ -43,6 +46,7 @@ def _get_openai_client() -> OpenAI:
     return _openai_client
 
 
+@functools.lru_cache(maxsize=1)
 def get_system_prompt() -> str:
     path = os.environ.get("SYSTEM_PROMPT_PATH", "system-prompt.txt")
     with open(path, "r", encoding="utf-8") as f:
@@ -59,6 +63,7 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
     history.append({"role": "user", "content": message_text})
 
     client = _get_openai_client()
+    t0 = time.monotonic()
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=400,
@@ -68,6 +73,15 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
             *history[-CONTEXT_WINDOW:],
         ],
     )
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    usage = response.usage
+    _logger.info(
+        "openai model=gpt-4o-mini tokens_in=%d tokens_out=%d latency_ms=%d",
+        usage.prompt_tokens if usage else 0,
+        usage.completion_tokens if usage else 0,
+        latency_ms,
+    )
+
     raw = response.choices[0].message.content or "{}"
     try:
         parsed = json.loads(raw)
@@ -75,7 +89,6 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
         parsed = {}
 
     reply = parsed.get("reply") or "Извините, не могу ответить на этот вопрос."
-    # Keyword list as safety net: fire if LLM missed the intent
     booking_intent = parsed.get("is_booking_intent", False) or is_booking_intent(message_text)
     guest_name = parsed.get("guest_name")
 

@@ -1,11 +1,19 @@
+import logging
 import os
 from supabase import create_client, Client
 
 MAX_HISTORY = 20
+_logger = logging.getLogger(__name__)
+_supabase_client: Client | None = None
 
 
 def get_client() -> Client:
-    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    global _supabase_client
+    if _supabase_client is None:
+        _supabase_client = create_client(
+            os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"]
+        )
+    return _supabase_client
 
 
 def get_history(platform: str, sender_id: str) -> list[dict]:

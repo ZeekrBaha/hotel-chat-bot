@@ -1,7 +1,10 @@
+import hashlib
+import logging
 import os
+import time
 from threading import Thread
 from flask import Flask, request
-from core import bot, notify
+from core import bot, db, notify
 from platforms import whatsapp
 
 REQUIRED_ENV = [
@@ -20,11 +23,33 @@ for _key in REQUIRED_ENV:
         raise RuntimeError(f"Missing required environment variable: {_key}")
 
 app = Flask(__name__)
+_logger = logging.getLogger(__name__)
+
+
+def _hash_phone(phone: str) -> str:
+    return hashlib.sha256(phone.encode()).hexdigest()[:8]
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health/deep")
+def health_deep():
+    checks = {}
+    try:
+        db.get_client()
+        checks["supabase"] = "ok"
+    except Exception as e:
+        checks["supabase"] = f"error: {e}"
+    try:
+        bot._get_openai_client()
+        checks["openai"] = "ok"
+    except Exception as e:
+        checks["openai"] = f"error: {e}"
+    all_ok = all(v == "ok" for v in checks.values())
+    return {"status": "ok" if all_ok else "degraded", "checks": checks}, (200 if all_ok else 503)
 
 
 @app.get("/whatsapp/webhook")
@@ -37,7 +62,9 @@ def whatsapp_verify():
     return "Forbidden", 403
 
 
-def _process_whatsapp(payload: dict, phone: str, text: str) -> None:
+def _process_whatsapp(payload: dict, phone: str, text: str, message_id: str) -> None:
+    t0 = time.monotonic()
+    phone_hash = _hash_phone(phone)
     try:
         result = bot.handle_message("whatsapp", phone, text)
         whatsapp.send_reply(phone, result["reply"])
@@ -45,9 +72,14 @@ def _process_whatsapp(payload: dict, phone: str, text: str) -> None:
             try:
                 notify.send_owner_alert(phone, "whatsapp", text, result["reply"])
             except Exception:
-                app.logger.exception("owner alert failed for %s", phone[:4] + "****")
+                _logger.exception("owner_alert_failed phone=%s", phone_hash)
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        _logger.info(
+            "processed message_id=%s phone=%s booking=%s latency_ms=%d",
+            message_id, phone_hash, result["is_booking_intent"], latency_ms,
+        )
     except Exception:
-        app.logger.exception("error processing whatsapp message from %s", phone[:4] + "****")
+        _logger.exception("process_error phone=%s message_id=%s", phone_hash, message_id)
 
 
 @app.post("/whatsapp/webhook")
@@ -65,5 +97,5 @@ def whatsapp_inbound():
     if whatsapp.is_duplicate(message_id):
         return "", 200
 
-    Thread(target=_process_whatsapp, args=(request.json, phone, text), daemon=True).start()
+    Thread(target=_process_whatsapp, args=(request.json, phone, text, message_id), daemon=True).start()
     return "", 200

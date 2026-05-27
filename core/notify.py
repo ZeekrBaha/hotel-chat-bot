@@ -1,5 +1,8 @@
+import logging
 import os
 import requests
+
+_logger = logging.getLogger(__name__)
 
 
 def send_owner_alert(
@@ -29,3 +32,6 @@ def send_owner_alert(
         timeout=(3, 10),
     )
     response.raise_for_status()
+    payload = response.json()
+    if payload.get("error"):
+        raise RuntimeError(f"Meta API error: {payload['error']}")

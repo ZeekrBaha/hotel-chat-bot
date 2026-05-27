@@ -142,6 +142,18 @@ def test_openai_client_configured_with_timeout_and_retries():
     bot_module._openai_client = None
 
 
+def test_get_system_prompt_is_cached():
+    from unittest.mock import mock_open
+    import core.bot as bot_module
+    bot_module.get_system_prompt.cache_clear()
+    m = mock_open(read_data="prompt content")
+    with patch("builtins.open", m):
+        bot_module.get_system_prompt()
+        bot_module.get_system_prompt()
+    assert m.call_count == 1  # file opened only once despite two calls
+    bot_module.get_system_prompt.cache_clear()
+
+
 def test_handle_message_passes_last_10_messages_to_openai():
     long_history = [{"role": "user", "content": str(i)} for i in range(15)]
     mock_openai = MagicMock()
