@@ -287,7 +287,7 @@ git commit -m "feat: core/db — Supabase get/save conversation history"
 
 ---
 
-## Task 3: core/bot.py — Claude call + booking intent
+## Task 3: core/bot.py — OpenAI call + booking intent
 
 **Files:**
 - Create: `core/bot.py`
@@ -298,16 +298,17 @@ git commit -m "feat: core/db — Supabase get/save conversation history"
 - [ ] **Step 1: Write `tests/test_bot.py`**
 
 ```python
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 from core.bot import handle_message, is_booking_intent
 
 FAKE_PROMPT = "Ты — администратор отеля."
 FAKE_REPLY = "Добрый день! Чем могу помочь?"
 
 
-def _mock_anthropic_response(text: str):
+def _mock_openai_response(text: str):
     response = MagicMock()
-    response.content = [MagicMock(text=text)]
+    response.choices = [MagicMock()]
+    response.choices[0].message.content = text
     return response
 
 
@@ -331,29 +332,29 @@ def test_is_booking_intent_is_case_insensitive():
 
 # --- handle_message ---
 
-def test_handle_message_calls_claude_with_system_prompt_and_history():
+def test_handle_message_calls_openai_with_system_prompt_and_history():
     mock_history = [{"role": "user", "content": "Привет"}]
-    mock_claude = MagicMock()
-    mock_claude.messages.create.return_value = _mock_anthropic_response(FAKE_REPLY)
+    mock_openai = MagicMock()
+    mock_openai.chat.completions.create.return_value = _mock_openai_response(FAKE_REPLY)
 
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=mock_history), \
          patch("core.bot.db.save_history"), \
-         patch("core.bot.anthropic.Anthropic", return_value=mock_claude):
+         patch("core.bot.OpenAI", return_value=mock_openai):
 
         result = handle_message("whatsapp", "79991234567", "Добрый день")
 
-    mock_claude.messages.create.assert_called_once()
-    call_kwargs = mock_claude.messages.create.call_args.kwargs
-    assert call_kwargs["system"] == FAKE_PROMPT
-    assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
+    mock_openai.chat.completions.create.assert_called_once()
+    call_kwargs = mock_openai.chat.completions.create.call_args.kwargs
+    assert call_kwargs["model"] == "gpt-4o-mini"
     assert call_kwargs["max_tokens"] == 400
+    assert call_kwargs["messages"][0] == {"role": "system", "content": FAKE_PROMPT}
     assert result == FAKE_REPLY
 
 
 def test_handle_message_appends_user_and_assistant_to_history():
-    mock_claude = MagicMock()
-    mock_claude.messages.create.return_value = _mock_anthropic_response(FAKE_REPLY)
+    mock_openai = MagicMock()
+    mock_openai.chat.completions.create.return_value = _mock_openai_response(FAKE_REPLY)
     saved = {}
 
     def capture_save(platform, sender_id, messages):
@@ -362,7 +363,7 @@ def test_handle_message_appends_user_and_assistant_to_history():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=[]), \
          patch("core.bot.db.save_history", side_effect=capture_save), \
-         patch("core.bot.anthropic.Anthropic", return_value=mock_claude):
+         patch("core.bot.OpenAI", return_value=mock_openai):
 
         handle_message("whatsapp", "79991234567", "Здравствуйте")
 
@@ -370,20 +371,22 @@ def test_handle_message_appends_user_and_assistant_to_history():
     assert saved["messages"][-1] == {"role": "assistant", "content": FAKE_REPLY}
 
 
-def test_handle_message_passes_last_10_messages_to_claude():
+def test_handle_message_passes_last_10_messages_to_openai():
     long_history = [{"role": "user", "content": str(i)} for i in range(15)]
-    mock_claude = MagicMock()
-    mock_claude.messages.create.return_value = _mock_anthropic_response(FAKE_REPLY)
+    mock_openai = MagicMock()
+    mock_openai.chat.completions.create.return_value = _mock_openai_response(FAKE_REPLY)
 
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=long_history), \
          patch("core.bot.db.save_history"), \
-         patch("core.bot.anthropic.Anthropic", return_value=mock_claude):
+         patch("core.bot.OpenAI", return_value=mock_openai):
 
         handle_message("whatsapp", "79991234567", "Новое сообщение")
 
-    sent_messages = mock_claude.messages.create.call_args.kwargs["messages"]
-    assert len(sent_messages) == 10
+    sent_messages = mock_openai.chat.completions.create.call_args.kwargs["messages"]
+    # system message + last 10 from history (15 existing + 1 new = 16, take last 10)
+    assert sent_messages[0]["role"] == "system"
+    assert len(sent_messages) == 11
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -400,7 +403,7 @@ Expected: `ImportError: No module named 'core.bot'`
 
 ```python
 import os
-import anthropic
+from openai import OpenAI
 from core import db
 
 BOOKING_KEYWORDS = [
@@ -425,14 +428,16 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> str:
     history = db.get_history(platform, sender_id)
     history.append({"role": "user", "content": message_text})
 
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
         max_tokens=400,
-        system=get_system_prompt(),
-        messages=history[-CONTEXT_WINDOW:],
+        messages=[
+            {"role": "system", "content": get_system_prompt()},
+            *history[-CONTEXT_WINDOW:],
+        ],
     )
-    reply = response.content[0].text
+    reply = response.choices[0].message.content
 
     history.append({"role": "assistant", "content": reply})
     db.save_history(platform, sender_id, history)
@@ -452,7 +457,7 @@ Expected: `8 passed`
 
 ```bash
 git add core/bot.py tests/test_bot.py
-git commit -m "feat: core/bot — Claude Haiku call, history, booking intent detection"
+git commit -m "feat: core/bot — OpenAI gpt-4o-mini call, history, booking intent detection"
 ```
 
 ---
