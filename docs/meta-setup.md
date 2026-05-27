@@ -4,7 +4,7 @@
 - A Facebook account (personal is fine)
 - A phone number that is NOT currently registered on WhatsApp
   (can be the hotel's SIM card — registering it here will remove it from regular WhatsApp)
-- A business name (even informal — "Отель Иссык-Куль" works)
+- A business name (even informal — "Hotel Bot" works)
 
 ## Step 1: Create Meta Business Manager
 1. Go to https://business.facebook.com
