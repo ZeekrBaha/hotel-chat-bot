@@ -125,8 +125,10 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
     else:
         booking_intent = is_booking_intent(message_text)
 
-    db.append_conversation_turn(platform, sender_id, {"role": "user", "content": message_text})
-    db.append_conversation_turn(platform, sender_id, {"role": "assistant", "content": reply})
+    db.append_conversation_turn(platform, sender_id, [
+        {"role": "user", "content": message_text},
+        {"role": "assistant", "content": reply},
+    ])
 
     return {
         "reply": reply,

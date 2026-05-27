@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock, patch
-from core.db import get_history, save_history
+from core.db import get_history
 import core.db as db_module
 
 
@@ -31,29 +31,6 @@ def test_get_history_returns_messages_when_record_exists():
     with patch("core.db.get_client", return_value=mock_client):
         result = get_history("whatsapp", "79991234567")
     assert result == messages
-
-
-def test_save_history_calls_upsert_with_correct_payload():
-    mock_client = MagicMock()
-    messages = [{"role": "user", "content": "Привет"}]
-    with patch("core.db.get_client", return_value=mock_client):
-        save_history("whatsapp", "79991234567", messages)
-    upsert_payload = mock_client.table.return_value.upsert.call_args[0][0]
-    assert upsert_payload["platform"] == "whatsapp"
-    assert upsert_payload["sender_id"] == "79991234567"
-    assert upsert_payload["messages"] == messages
-    assert "updated_at" in upsert_payload
-
-
-def test_save_history_trims_to_last_20_messages():
-    mock_client = MagicMock()
-    messages = [{"role": "user", "content": str(i)} for i in range(25)]
-    with patch("core.db.get_client", return_value=mock_client):
-        save_history("whatsapp", "79991234567", messages)
-    saved = mock_client.table.return_value.upsert.call_args[0][0]["messages"]
-    assert len(saved) == 20
-    assert saved[0]["content"] == "5"   # oldest 5 dropped
-    assert saved[-1]["content"] == "24"
 
 
 def test_increment_daily_counter_calls_rpc_with_correct_params():

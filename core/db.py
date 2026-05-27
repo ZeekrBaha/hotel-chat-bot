@@ -39,25 +39,13 @@ def increment_daily_counter(platform: str, sender_id: str) -> int:
     return result.data if isinstance(result.data, int) else 1
 
 
-def save_history(platform: str, sender_id: str, messages: list[dict]) -> None:
-    trimmed = messages[-MAX_HISTORY:]
-    get_client().table("conversations").upsert(
-        {
-            "platform": platform,
-            "sender_id": sender_id,
-            "messages": trimmed,
-            "updated_at": datetime.datetime.now(datetime.UTC).isoformat(),
-        },
-        on_conflict="platform,sender_id",
-    ).execute()
-
-
-def append_conversation_turn(platform: str, sender_id: str, message: dict) -> None:
-    """Atomically append a single message to conversation history via RPC."""
+def append_conversation_turn(platform: str, sender_id: str, messages: dict | list[dict]) -> None:
+    """Atomically append message(s) to conversation history via RPC."""
+    messages_list = messages if isinstance(messages, list) else [messages]
     get_client().rpc("append_conversation_turn", {
         "p_platform": platform,
         "p_sender_id": sender_id,
-        "p_messages": [message],
+        "p_messages": messages_list,
         "p_max_history": MAX_HISTORY,
     }).execute()
 

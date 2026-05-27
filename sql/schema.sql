@@ -87,7 +87,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Atomic message append. Appends up to MAX_HISTORY messages to conversation history.
+-- Atomic message append. Appends new messages and keeps only the last p_max_history.
 CREATE OR REPLACE FUNCTION append_conversation_turn(
   p_platform TEXT,
   p_sender_id TEXT,
@@ -97,21 +97,40 @@ CREATE OR REPLACE FUNCTION append_conversation_turn(
 BEGIN
   UPDATE conversations
     SET messages = (
-      SELECT jsonb_agg(elem)
-      FROM jsonb_array_elements(
-        CASE WHEN messages IS NULL OR jsonb_array_length(messages) = 0
-        THEN p_messages
-        ELSE messages || p_messages
-        END
-      ) AS elem
-      LIMIT p_max_history
+      WITH combined AS (
+        SELECT elem, row_number() OVER () AS rn
+        FROM jsonb_array_elements(
+          COALESCE(messages, '[]'::jsonb) || p_messages
+        ) AS elem
+      ),
+      total AS (
+        SELECT count(*) AS n FROM combined
+      )
+      SELECT jsonb_agg(elem ORDER BY rn)
+      FROM combined, total
+      WHERE rn > GREATEST(0, total.n - p_max_history)
     ),
     updated_at = NOW()
     WHERE platform = p_platform AND sender_id = p_sender_id;
   IF NOT FOUND THEN
     INSERT INTO conversations (platform, sender_id, messages, updated_at)
       VALUES (p_platform, p_sender_id, p_messages, NOW())
-      ON CONFLICT DO NOTHING;
+      ON CONFLICT (platform, sender_id) DO UPDATE
+      SET messages = (
+        WITH combined AS (
+          SELECT elem, row_number() OVER () AS rn
+          FROM jsonb_array_elements(
+            COALESCE(conversations.messages, '[]'::jsonb) || EXCLUDED.messages
+          ) AS elem
+        ),
+        total AS (
+          SELECT count(*) AS n FROM combined
+        )
+        SELECT jsonb_agg(elem ORDER BY rn)
+        FROM combined, total
+        WHERE rn > GREATEST(0, total.n - p_max_history)
+      ),
+      updated_at = NOW();
   END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -129,3 +148,4 @@ $$ LANGUAGE plpgsql;
 --   message_id TEXT PRIMARY KEY,
 --   processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 -- );
+-- Then run the RPC creation statements below (copy-paste from this file).

@@ -13,6 +13,7 @@ from platforms import whatsapp
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    force=True,
 )
 
 REQUIRED_ENV = [
@@ -35,6 +36,7 @@ _logger = logging.getLogger(__name__)
 
 _inflight: set[threading.Thread] = set()
 _inflight_lock = threading.Lock()
+_orig_sigterm = signal.getsignal(signal.SIGTERM)
 
 
 def _graceful_exit(signum, frame):
@@ -44,6 +46,8 @@ def _graceful_exit(signum, frame):
     for t in inflight_copy:
         t.join(timeout=15)
     _logger.info("graceful_exit complete")
+    if callable(_orig_sigterm):
+        _orig_sigterm(signum, frame)
 
 
 signal.signal(signal.SIGTERM, _graceful_exit)
@@ -103,8 +107,6 @@ def _process_whatsapp(phone: str, text: str, message_id: str) -> None:
     t0 = time.monotonic()
     phone_hash = _hash_phone(phone)
     current_thread = threading.current_thread()
-    with _inflight_lock:
-        _inflight.add(current_thread)
     try:
         result = bot.handle_message("whatsapp", phone, text)
         send_ok = whatsapp.send_reply(phone, result["reply"])
@@ -156,5 +158,7 @@ def whatsapp_inbound():
         return "", 200
 
     t = Thread(target=_process_whatsapp, args=(phone, text, message_id), daemon=False)
+    with _inflight_lock:
+        _inflight.add(t)
     t.start()
     return "", 200
