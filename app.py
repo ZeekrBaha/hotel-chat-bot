@@ -30,6 +30,15 @@ def _hash_phone(phone: str) -> str:
     return hashlib.sha256(phone.encode()).hexdigest()[:8]
 
 
+def _booking_complete(result: dict) -> bool:
+    return all([
+        result.get("guest_name"),
+        result.get("check_in"),
+        result.get("check_out"),
+        result.get("num_guests"),
+    ])
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -69,9 +78,14 @@ def _process_whatsapp(payload: dict, phone: str, text: str, message_id: str) -> 
     try:
         result = bot.handle_message("whatsapp", phone, text)
         whatsapp.send_reply(phone, result["reply"])
-        if result["is_booking_intent"]:
+        if _booking_complete(result):
             try:
-                notify.send_owner_alert(phone, "whatsapp", text, result["reply"])
+                notify.send_owner_alert(phone, "whatsapp", {
+                    "guest_name": result["guest_name"],
+                    "check_in": result["check_in"],
+                    "check_out": result["check_out"],
+                    "num_guests": result["num_guests"],
+                })
             except Exception:
                 _logger.exception("owner_alert_failed phone=%s", phone_hash)
         latency_ms = int((time.monotonic() - t0) * 1000)

@@ -5,19 +5,19 @@ import requests
 _logger = logging.getLogger(__name__)
 
 
-def send_owner_alert(
-    sender_id: str, platform: str, message_text: str, bot_reply: str
-) -> None:
+def send_owner_alert(sender_id: str, platform: str, booking: dict) -> None:
     token = os.environ["WHATSAPP_ACCESS_TOKEN"]
     phone_number_id = os.environ["WHATSAPP_PHONE_NUMBER_ID"]
     owner_number = os.environ["OWNER_PHONE_NUMBER"]
 
     body = (
         f"Новая заявка на бронирование\n"
+        f"Гость: {booking['guest_name']}\n"
+        f"Заезд: {booking['check_in']}\n"
+        f"Выезд: {booking['check_out']}\n"
+        f"Кол-во гостей: {booking['num_guests']}\n"
         f"Платформа: {platform}\n"
-        f"Гость: {sender_id}\n"
-        f"Сообщение: {message_text}\n"
-        f"Ответ бота: {bot_reply}"
+        f"Контакт: {sender_id}"
     )
 
     response = requests.post(

@@ -18,8 +18,33 @@ def _sign(payload: bytes, secret: str) -> str:
     return f"sha256={h.hexdigest()}"
 
 
-def _bot_result(reply: str, is_booking: bool = False, guest_name: str | None = None) -> dict:
-    return {"reply": reply, "is_booking_intent": is_booking, "guest_name": guest_name}
+def _bot_result(
+    reply: str,
+    is_booking: bool = False,
+    guest_name: str | None = None,
+    check_in: str | None = None,
+    check_out: str | None = None,
+    num_guests: int | None = None,
+) -> dict:
+    return {
+        "reply": reply,
+        "is_booking_intent": is_booking,
+        "guest_name": guest_name,
+        "check_in": check_in,
+        "check_out": check_out,
+        "num_guests": num_guests,
+    }
+
+
+def _complete_booking_result(reply: str = "Бронь подтверждена.") -> dict:
+    return _bot_result(
+        reply=reply,
+        is_booking=True,
+        guest_name="Айгуль",
+        check_in="05.06.2026",
+        check_out="07.06.2026",
+        num_guests=2,
+    )
 
 
 # --- GET /health ---
@@ -119,13 +144,45 @@ def test_whatsapp_inbound_returns_200_and_calls_bot(client):
     mock_send.assert_called_once_with("79991234567", "Добрый день!")
 
 
-def test_whatsapp_inbound_sends_owner_alert_on_booking_intent(client):
+def test_whatsapp_inbound_sends_alert_when_all_booking_slots_filled(client):
     import platforms.whatsapp as wa_module
     wa_module._seen_message_ids.clear()
 
-    payload = json.dumps(_inbound_payload(text="Хочу забронировать", msg_id="wamid.alert1")).encode()
+    payload = json.dumps(_inbound_payload(text="Айгуль, 5-7 июня, 2 человека", msg_id="wamid.alert1")).encode()
     sig = _sign(payload, "test-app-secret")
 
+    with patch("app.Thread", _SyncThread), \
+         patch("app.bot.handle_message", return_value=_complete_booking_result()), \
+         patch("app.whatsapp.send_reply"), \
+         patch("app.notify.send_owner_alert") as mock_notify:
+
+        client.post(
+            "/whatsapp/webhook",
+            data=payload,
+            content_type="application/json",
+            headers={"X-Hub-Signature-256": sig},
+        )
+
+    mock_notify.assert_called_once_with(
+        "79991234567",
+        "whatsapp",
+        {
+            "guest_name": "Айгуль",
+            "check_in": "05.06.2026",
+            "check_out": "07.06.2026",
+            "num_guests": 2,
+        },
+    )
+
+
+def test_whatsapp_inbound_no_alert_when_booking_slots_incomplete(client):
+    import platforms.whatsapp as wa_module
+    wa_module._seen_message_ids.clear()
+
+    payload = json.dumps(_inbound_payload(text="Хочу забронировать", msg_id="wamid.partial1")).encode()
+    sig = _sign(payload, "test-app-secret")
+
+    # booking intent but missing check_in/check_out/num_guests
     with patch("app.Thread", _SyncThread), \
          patch("app.bot.handle_message", return_value=_bot_result("Уточните даты.", is_booking=True)), \
          patch("app.whatsapp.send_reply"), \
@@ -138,20 +195,18 @@ def test_whatsapp_inbound_sends_owner_alert_on_booking_intent(client):
             headers={"X-Hub-Signature-256": sig},
         )
 
-    mock_notify.assert_called_once_with(
-        "79991234567", "whatsapp", "Хочу забронировать", "Уточните даты."
-    )
+    mock_notify.assert_not_called()
 
 
 def test_whatsapp_inbound_sends_reply_even_if_owner_alert_fails(client):
     import platforms.whatsapp as wa_module
     wa_module._seen_message_ids.clear()
 
-    payload = json.dumps(_inbound_payload(text="Хочу забронировать", msg_id="wamid.fail1")).encode()
+    payload = json.dumps(_inbound_payload(text="Айгуль, 5-7 июня, 2 человека", msg_id="wamid.fail1")).encode()
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
-         patch("app.bot.handle_message", return_value=_bot_result("Уточните даты.", is_booking=True)), \
+         patch("app.bot.handle_message", return_value=_complete_booking_result("Ваша бронь подтверждена.")), \
          patch("app.notify.send_owner_alert", side_effect=Exception("network error")), \
          patch("app.whatsapp.send_reply") as mock_send:
 
@@ -163,7 +218,7 @@ def test_whatsapp_inbound_sends_reply_even_if_owner_alert_fails(client):
         )
 
     assert response.status_code == 200
-    mock_send.assert_called_once_with("79991234567", "Уточните даты.")
+    mock_send.assert_called_once_with("79991234567", "Ваша бронь подтверждена.")
 
 
 def test_whatsapp_inbound_returns_200_for_non_text_message(client):

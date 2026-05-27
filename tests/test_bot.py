@@ -13,8 +13,22 @@ def _mock_openai_response(text: str):
     return response
 
 
-def _mock_structured_response(reply: str, is_booking: bool, guest_name: str | None = None):
-    payload = json.dumps({"reply": reply, "is_booking_intent": is_booking, "guest_name": guest_name})
+def _mock_structured_response(
+    reply: str,
+    is_booking: bool,
+    guest_name: str | None = None,
+    check_in: str | None = None,
+    check_out: str | None = None,
+    num_guests: int | None = None,
+):
+    payload = json.dumps({
+        "reply": reply,
+        "is_booking_intent": is_booking,
+        "guest_name": guest_name,
+        "check_in": check_in,
+        "check_out": check_out,
+        "num_guests": num_guests,
+    })
     return _mock_openai_response(payload)
 
 
@@ -75,6 +89,29 @@ def test_handle_message_returns_structured_dict():
     assert result["reply"] == FAKE_REPLY
     assert result["is_booking_intent"] is True
     assert result["guest_name"] == "Иван"
+
+
+def test_handle_message_returns_all_booking_slots():
+    mock_openai = MagicMock()
+    mock_openai.chat.completions.create.return_value = _mock_structured_response(
+        FAKE_REPLY, True,
+        guest_name="Айгуль",
+        check_in="05.06.2026",
+        check_out="07.06.2026",
+        num_guests=2,
+    )
+
+    with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
+         patch("core.bot.db.get_history", return_value=[]), \
+         patch("core.bot.db.save_history"), \
+         patch("core.bot._get_openai_client", return_value=mock_openai):
+
+        result = handle_message("whatsapp", "79991234567", "Хочу забронировать на 5-7 июня")
+
+    assert result["guest_name"] == "Айгуль"
+    assert result["check_in"] == "05.06.2026"
+    assert result["check_out"] == "07.06.2026"
+    assert result["num_guests"] == 2
 
 
 def test_handle_message_uses_structured_output_response_format():

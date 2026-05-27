@@ -15,6 +15,9 @@ CONTEXT_WINDOW = 10
 _logger = logging.getLogger(__name__)
 _openai_client: OpenAI | None = None
 
+_nullable_str = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+_nullable_int = {"anyOf": [{"type": "integer"}, {"type": "null"}]}
+
 _RESPONSE_FORMAT = {
     "type": "json_schema",
     "json_schema": {
@@ -25,11 +28,15 @@ _RESPONSE_FORMAT = {
             "properties": {
                 "reply": {"type": "string"},
                 "is_booking_intent": {"type": "boolean"},
-                "guest_name": {
-                    "anyOf": [{"type": "string"}, {"type": "null"}]
-                },
+                "guest_name": _nullable_str,
+                "check_in": _nullable_str,
+                "check_out": _nullable_str,
+                "num_guests": _nullable_int,
             },
-            "required": ["reply", "is_booking_intent", "guest_name"],
+            "required": [
+                "reply", "is_booking_intent",
+                "guest_name", "check_in", "check_out", "num_guests",
+            ],
             "additionalProperties": False,
         },
     },
@@ -96,7 +103,6 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
 
     reply = parsed.get("reply") or "Извините, не могу ответить на этот вопрос."
     booking_intent = parsed.get("is_booking_intent", False) or is_booking_intent(message_text)
-    guest_name = parsed.get("guest_name")
 
     history.append({"role": "assistant", "content": reply})
     db.save_history(platform, sender_id, history)
@@ -104,5 +110,8 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
     return {
         "reply": reply,
         "is_booking_intent": booking_intent,
-        "guest_name": guest_name,
+        "guest_name": parsed.get("guest_name"),
+        "check_in": parsed.get("check_in"),
+        "check_out": parsed.get("check_out"),
+        "num_guests": parsed.get("num_guests"),
     }
