@@ -38,6 +38,7 @@ def _handle_message_patches(mock_openai, history=None):
         patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT),
         patch("core.bot.db.get_history", return_value=history or []),
         patch("core.bot.db.save_history"),
+        patch("core.bot.db.append_conversation_turn"),
         patch("core.bot.db.increment_daily_counter", return_value=1),
         patch("core.bot._get_openai_client", return_value=mock_openai),
         patch("core.bot._today", return_value="27.05.2026"),
@@ -72,6 +73,7 @@ def test_handle_message_calls_openai_with_system_prompt_and_history():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=mock_history), \
          patch("core.bot.db.save_history"), \
+         patch("core.bot.db.append_conversation_turn"), \
          patch("core.bot.db.increment_daily_counter", return_value=1), \
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):
@@ -96,6 +98,7 @@ def test_handle_message_returns_structured_dict():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=[]), \
          patch("core.bot.db.save_history"), \
+         patch("core.bot.db.append_conversation_turn"), \
          patch("core.bot.db.increment_daily_counter", return_value=1), \
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):
@@ -121,6 +124,7 @@ def test_handle_message_returns_all_booking_slots():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=[]), \
          patch("core.bot.db.save_history"), \
+         patch("core.bot.db.append_conversation_turn"), \
          patch("core.bot.db.increment_daily_counter", return_value=1), \
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):
@@ -140,6 +144,7 @@ def test_handle_message_uses_structured_output_response_format():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=[]), \
          patch("core.bot.db.save_history"), \
+         patch("core.bot.db.append_conversation_turn"), \
          patch("core.bot.db.increment_daily_counter", return_value=1), \
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):
@@ -159,6 +164,7 @@ def test_handle_message_trusts_llm_over_keywords():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=[]), \
          patch("core.bot.db.save_history"), \
+         patch("core.bot.db.append_conversation_turn"), \
          patch("core.bot.db.increment_daily_counter", return_value=1), \
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):
@@ -175,6 +181,7 @@ def test_handle_message_injects_todays_date_in_system_prompt():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=[]), \
          patch("core.bot.db.save_history"), \
+         patch("core.bot.db.append_conversation_turn"), \
          patch("core.bot.db.increment_daily_counter", return_value=1), \
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):
@@ -188,22 +195,21 @@ def test_handle_message_injects_todays_date_in_system_prompt():
 def test_handle_message_appends_user_and_assistant_to_history():
     mock_openai = MagicMock()
     mock_openai.chat.completions.create.return_value = _mock_structured_response(FAKE_REPLY, False)
-    saved = {}
-
-    def capture_save(platform, sender_id, messages):
-        saved["messages"] = messages
 
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=[]), \
-         patch("core.bot.db.save_history", side_effect=capture_save), \
+         patch("core.bot.db.append_conversation_turn") as mock_append, \
          patch("core.bot.db.increment_daily_counter", return_value=1), \
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):
 
         handle_message("whatsapp", "79991234567", "Здравствуйте")
 
-    assert saved["messages"][-2] == {"role": "user", "content": "Здравствуйте"}
-    assert saved["messages"][-1] == {"role": "assistant", "content": FAKE_REPLY}
+    assert mock_append.call_count == 2
+    user_call = mock_append.call_args_list[0]
+    assert user_call[0] == ("whatsapp", "79991234567", {"role": "user", "content": "Здравствуйте"})
+    assistant_call = mock_append.call_args_list[1]
+    assert assistant_call[0] == ("whatsapp", "79991234567", {"role": "assistant", "content": FAKE_REPLY})
 
 
 def test_handle_message_returns_escalation_when_daily_limit_exceeded():
@@ -267,7 +273,7 @@ def test_handle_message_passes_last_10_messages_to_openai():
 
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=long_history), \
-         patch("core.bot.db.save_history"), \
+         patch("core.bot.db.append_conversation_turn"), \
          patch("core.bot.db.increment_daily_counter", return_value=1), \
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):

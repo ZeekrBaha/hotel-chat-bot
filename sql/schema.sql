@@ -69,6 +69,53 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Atomic booking alert dedup. Returns TRUE if alert should fire (booking key changed).
+CREATE OR REPLACE FUNCTION set_booking_alert_if_new(
+  p_platform TEXT,
+  p_sender_id TEXT,
+  p_key TEXT
+) RETURNS BOOLEAN AS $$
+DECLARE
+  v_updated INT;
+BEGIN
+  UPDATE conversations
+    SET last_alerted_booking_key = p_key
+    WHERE platform = p_platform AND sender_id = p_sender_id
+      AND (last_alerted_booking_key IS DISTINCT FROM p_key);
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+  RETURN v_updated = 1;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Atomic message append. Appends up to MAX_HISTORY messages to conversation history.
+CREATE OR REPLACE FUNCTION append_conversation_turn(
+  p_platform TEXT,
+  p_sender_id TEXT,
+  p_messages JSONB,
+  p_max_history INT DEFAULT 20
+) RETURNS VOID AS $$
+BEGIN
+  UPDATE conversations
+    SET messages = (
+      SELECT jsonb_agg(elem)
+      FROM jsonb_array_elements(
+        CASE WHEN messages IS NULL OR jsonb_array_length(messages) = 0
+        THEN p_messages
+        ELSE messages || p_messages
+        END
+      ) AS elem
+      LIMIT p_max_history
+    ),
+    updated_at = NOW()
+    WHERE platform = p_platform AND sender_id = p_sender_id;
+  IF NOT FOUND THEN
+    INSERT INTO conversations (platform, sender_id, messages, updated_at)
+      VALUES (p_platform, p_sender_id, p_messages, NOW())
+      ON CONFLICT DO NOTHING;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Migration for existing databases:
 -- ALTER TABLE conversations
 --   ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

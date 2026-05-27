@@ -2,7 +2,9 @@ import datetime
 import hashlib
 import logging
 import os
+import signal
 import time
+import threading
 from threading import Thread
 from flask import Flask, request
 from core import bot, db, notify
@@ -30,6 +32,21 @@ for _key in REQUIRED_ENV:
 
 app = Flask(__name__)
 _logger = logging.getLogger(__name__)
+
+_inflight: set[threading.Thread] = set()
+_inflight_lock = threading.Lock()
+
+
+def _graceful_exit(signum, frame):
+    _logger.info("SIGTERM received, waiting for %d in-flight requests...", len(_inflight))
+    with _inflight_lock:
+        inflight_copy = list(_inflight)
+    for t in inflight_copy:
+        t.join(timeout=15)
+    _logger.info("graceful_exit complete")
+
+
+signal.signal(signal.SIGTERM, _graceful_exit)
 
 
 def _hash_phone(phone: str) -> str:
@@ -85,9 +102,15 @@ def _process_whatsapp(phone: str, text: str, message_id: str) -> None:
     text = text[:1000]
     t0 = time.monotonic()
     phone_hash = _hash_phone(phone)
+    current_thread = threading.current_thread()
+    with _inflight_lock:
+        _inflight.add(current_thread)
     try:
         result = bot.handle_message("whatsapp", phone, text)
-        whatsapp.send_reply(phone, result["reply"])
+        send_ok = whatsapp.send_reply(phone, result["reply"])
+        if not send_ok:
+            _logger.error("reply_undelivered phone=%s message_id=%s", phone_hash, message_id)
+            return
         if result.get("escalated"):
             try:
                 notify.send_escalation_alert(phone, "whatsapp")
@@ -112,6 +135,9 @@ def _process_whatsapp(phone: str, text: str, message_id: str) -> None:
         )
     except Exception:
         _logger.exception("process_error phone=%s message_id=%s", phone_hash, message_id)
+    finally:
+        with _inflight_lock:
+            _inflight.discard(current_thread)
 
 
 @app.post("/whatsapp/webhook")
@@ -129,5 +155,6 @@ def whatsapp_inbound():
     if db.is_duplicate_message(message_id):
         return "", 200
 
-    Thread(target=_process_whatsapp, args=(phone, text, message_id), daemon=True).start()
+    t = Thread(target=_process_whatsapp, args=(phone, text, message_id), daemon=False)
+    t.start()
     return "", 200

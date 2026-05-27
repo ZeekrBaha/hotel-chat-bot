@@ -103,7 +103,8 @@ def test_is_duplicate_message_returns_true_for_seen_message():
 
 
 def test_check_and_set_booking_alert_returns_true_for_new_booking():
-    mock_client = _make_mock_client(data=[{"last_alerted_booking_key": None}])
+    mock_client = MagicMock()
+    mock_client.rpc.return_value.execute.return_value.data = True  # RPC: row updated
     booking = {
         "guest_name": "Айгуль",
         "check_in": "2026-06-05",
@@ -113,6 +114,11 @@ def test_check_and_set_booking_alert_returns_true_for_new_booking():
     with patch("core.db.get_client", return_value=mock_client):
         result = db_module.check_and_set_booking_alert("whatsapp", "79991234567", booking)
     assert result is True
+    mock_client.rpc.assert_called_once_with("set_booking_alert_if_new", {
+        "p_platform": "whatsapp",
+        "p_sender_id": "79991234567",
+        "p_key": "Айгуль|2026-06-05|2026-06-07|2",
+    })
 
 
 def test_check_and_set_booking_alert_returns_false_for_same_booking():
@@ -122,8 +128,8 @@ def test_check_and_set_booking_alert_returns_false_for_same_booking():
         "check_out": "2026-06-07",
         "num_guests": 2,
     }
-    key = "Айгуль|2026-06-05|2026-06-07|2"
-    mock_client = _make_mock_client(data=[{"last_alerted_booking_key": key}])
+    mock_client = MagicMock()
+    mock_client.rpc.return_value.execute.return_value.data = False  # RPC: row not updated
     with patch("core.db.get_client", return_value=mock_client):
         result = db_module.check_and_set_booking_alert("whatsapp", "79991234567", booking)
     assert result is False

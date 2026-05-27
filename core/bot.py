@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from zoneinfo import ZoneInfo
 from openai import OpenAI
 from core import db
 
@@ -64,7 +65,6 @@ def get_system_prompt() -> str:
 
 
 def _today() -> str:
-    from zoneinfo import ZoneInfo
     return datetime.datetime.now(ZoneInfo(os.environ.get("HOTEL_TZ", "Asia/Bishkek"))).date().strftime("%d.%m.%Y")
 
 
@@ -120,10 +120,13 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
         parsed = {}
 
     reply = parsed.get("reply") or "Извините, не могу ответить на этот вопрос."
-    booking_intent = parsed.get("is_booking_intent", False)
+    if parsed:
+        booking_intent = parsed.get("is_booking_intent", False)
+    else:
+        booking_intent = is_booking_intent(message_text)
 
-    history.append({"role": "assistant", "content": reply})
-    db.save_history(platform, sender_id, history)
+    db.append_conversation_turn(platform, sender_id, {"role": "user", "content": message_text})
+    db.append_conversation_turn(platform, sender_id, {"role": "assistant", "content": reply})
 
     return {
         "reply": reply,
