@@ -16,7 +16,11 @@ def parse_inbound(payload: dict) -> tuple[str, str, str] | None:
             return None
         if "@g.us" in message.get("from", ""):
             return None
-        return message["from"], message["text"]["body"], message["id"]
+        message_id = message.get("id") or ""
+        if not message_id:
+            _logger.warning("parse_inbound_missing_message_id payload=%r", str(payload)[:200])
+            return None
+        return message["from"], message["text"]["body"], message_id
     except (KeyError, IndexError):
         return None
 

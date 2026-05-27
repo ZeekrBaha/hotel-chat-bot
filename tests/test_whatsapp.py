@@ -120,6 +120,30 @@ def test_send_reply_returns_false_and_logs_on_http_error():
     mock_logger.error.assert_called_once()
 
 
+def test_parse_inbound_returns_none_for_missing_message_id():
+    payload = {
+        "entry": [{"changes": [{"value": {"messages": [{
+            "from": "79991234567",
+            "type": "text",
+            "text": {"body": "Привет"},
+            # "id" key absent
+        }]}}]}]
+    }
+    assert parse_inbound(payload) is None
+
+
+def test_parse_inbound_returns_none_for_empty_message_id():
+    payload = {
+        "entry": [{"changes": [{"value": {"messages": [{
+            "id": "",
+            "from": "79991234567",
+            "type": "text",
+            "text": {"body": "Привет"},
+        }]}}]}]
+    }
+    assert parse_inbound(payload) is None
+
+
 def test_parse_inbound_skips_group_message():
     group_payload = {
         "entry": [{
