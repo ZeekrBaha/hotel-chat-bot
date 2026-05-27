@@ -40,7 +40,7 @@ def test_handle_message_calls_openai_with_system_prompt_and_history():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=mock_history), \
          patch("core.bot.db.save_history"), \
-         patch("core.bot.OpenAI", return_value=mock_openai):
+         patch("core.bot._get_openai_client", return_value=mock_openai):
 
         result = handle_message("whatsapp", "79991234567", "Добрый день")
 
@@ -63,7 +63,7 @@ def test_handle_message_appends_user_and_assistant_to_history():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=[]), \
          patch("core.bot.db.save_history", side_effect=capture_save), \
-         patch("core.bot.OpenAI", return_value=mock_openai):
+         patch("core.bot._get_openai_client", return_value=mock_openai):
 
         handle_message("whatsapp", "79991234567", "Здравствуйте")
 
@@ -79,7 +79,7 @@ def test_handle_message_passes_last_10_messages_to_openai():
     with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
          patch("core.bot.db.get_history", return_value=long_history), \
          patch("core.bot.db.save_history"), \
-         patch("core.bot.OpenAI", return_value=mock_openai):
+         patch("core.bot._get_openai_client", return_value=mock_openai):
 
         handle_message("whatsapp", "79991234567", "Новое сообщение")
 

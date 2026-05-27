@@ -8,6 +8,15 @@ BOOKING_KEYWORDS = [
 ]
 CONTEXT_WINDOW = 10
 
+_openai_client: OpenAI | None = None
+
+
+def _get_openai_client() -> OpenAI:
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    return _openai_client
+
 
 def get_system_prompt() -> str:
     path = os.environ.get("SYSTEM_PROMPT_PATH", "system-prompt.txt")
@@ -24,7 +33,7 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> str:
     history = db.get_history(platform, sender_id)
     history.append({"role": "user", "content": message_text})
 
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    client = _get_openai_client()
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=400,
@@ -33,7 +42,7 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> str:
             *history[-CONTEXT_WINDOW:],
         ],
     )
-    reply = response.choices[0].message.content
+    reply = response.choices[0].message.content or "Извините, не могу ответить на этот вопрос."
 
     history.append({"role": "assistant", "content": reply})
     db.save_history(platform, sender_id, history)

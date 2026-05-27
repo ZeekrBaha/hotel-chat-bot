@@ -17,7 +17,7 @@ def send_owner_alert(
         f"Ответ бота: {bot_reply}"
     )
 
-    requests.post(
+    response = requests.post(
         f"https://graph.facebook.com/v19.0/{phone_number_id}/messages",
         headers={"Authorization": f"Bearer {token}"},
         json={
@@ -27,3 +27,4 @@ def send_owner_alert(
             "text": {"body": body},
         },
     )
+    response.raise_for_status()
