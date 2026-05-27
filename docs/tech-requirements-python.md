@@ -1,8 +1,8 @@
-# Hotel WhatsApp Bot — Technical Requirements
-## Python + VPS + Supabase Stack
+# Hotel Chat Bot — Technical Requirements
+## Python + VPS + Supabase Stack — WhatsApp (v1 POC) + Telegram (v2)
 
-**Version:** 1.0  
-**Date:** 2026-05-11  
+**Version:** 1.1  
+**Date:** 2026-05-27  
 **Author:** Baha  
 **Status:** Draft — pending review
 
@@ -10,33 +10,42 @@
 
 ## 1. Overview
 
-A Python-based WhatsApp AI assistant for a small hotel. Guests send WhatsApp messages in Russian or Kyrgyz; the bot answers FAQs automatically using Claude Haiku and notifies the owner when a booking request is detected. All conversation history is stored in Supabase so the bot remembers context across messages and the owner can review all chats.
+A Python-based AI assistant for a small hotel. Guests send messages via WhatsApp or Telegram; the bot answers FAQs automatically using Claude Haiku and notifies the owner when a booking request is detected. All conversation history is stored in Supabase so the bot remembers context across messages and the owner can review all chats.
+
+**Platform rollout:**
+- **v1 (POC):** WhatsApp only — Meta WhatsApp Business Cloud API
+- **v2:** Add Telegram — Telegram Bot API
+
+The core bot logic (Claude, Supabase, booking intent) is shared. Only the webhook handler and send functions differ per platform.
 
 ---
 
 ## 2. System Architecture
 
 ```
-Guest (WhatsApp)
-      │
-      ▼
-Meta WhatsApp Business Cloud API
-      │  POST /webhook
-      ▼
-Flask Application (VPS)
-      │
-      ├─── db.py ──────► Supabase (PostgreSQL)
-      │                   conversations table
-      │                   (per-guest message history)
-      │
-      ├─── bot.py ─────► Anthropic API (Claude Haiku 3.5)
-      │                   Russian/Kyrgyz system prompt
-      │                   last 10 messages as context
-      │
-      └─── notify ─────► Meta WhatsApp API
-                          → sister's number (booking alerts)
-                          → guest (reply)
+Guest (WhatsApp)                    Guest (Telegram)
+      │                                   │
+      ▼                                   ▼
+Meta WhatsApp Business API      Telegram Bot API
+      │  POST /whatsapp/webhook          │  POST /telegram/webhook
+      └──────────────┬───────────────────┘
+                     ▼
+           Flask Application (VPS)
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+  platforms/                 core/
+  whatsapp.py               bot.py ──────► Anthropic API (Claude Haiku)
+  telegram.py               db.py  ──────► Supabase (PostgreSQL)
+                            notify.py       conversations table
 ```
+
+**Request flow (both platforms):**
+1. Inbound message arrives at platform-specific webhook route
+2. Platform module extracts `(sender_id, message_text)` and normalises it
+3. `bot.py` handles Claude call + Supabase history (platform-agnostic)
+4. Platform module sends the reply back via the correct API
+5. `notify.py` sends owner alert via WhatsApp when booking intent is detected
 
 ---
 
@@ -51,7 +60,7 @@ Flask Application (VPS)
 | Cost | €4–6/month |
 | OS | Ubuntu 22.04 LTS |
 | Region | EU (Falkenstein or Helsinki) |
-| Public IP | Required (static, for webhook) |
+| Public IP | Required (static, for webhooks) |
 
 **Required services on VPS:**
 - Python 3.11+
@@ -62,7 +71,7 @@ Flask Application (VPS)
 
 ### 3.2 Domain
 
-A domain name is required for HTTPS (Meta rejects non-HTTPS webhook URLs).
+A domain name is required for HTTPS (Meta rejects non-HTTPS webhook URLs; Telegram also requires HTTPS for webhooks).
 
 Options:
 - Buy a cheap domain (~$10/year) from Namecheap or Cloudflare
@@ -85,25 +94,29 @@ Alternative (no domain): use Cloudflare Tunnel (free) to expose the Flask app ov
 ## 4. File Structure
 
 ```
-hotel-bot/
-├── app.py                  ← Flask app: webhook handler, routing
-├── bot.py                  ← Claude Haiku call, system prompt, reply logic
-├── db.py                   ← Supabase: read/write conversation history
-├── notify.py               ← Send WhatsApp notification to sister
-├── system-prompt.txt       ← Russian/Kyrgyz hotel prompt (owner edits this)
-├── requirements.txt        ← Python dependencies
-├── .env.example            ← Environment variable template (no secrets)
-├── .env                    ← Actual secrets (never committed to git)
-├── .gitignore              ← Excludes .env, __pycache__, etc.
+hotel-chat-bot/
+├── app.py                      ← Flask app: routes for both platform webhooks
+├── core/
+│   ├── bot.py                  ← Claude Haiku call, system prompt, reply logic (shared)
+│   ├── db.py                   ← Supabase: read/write conversation history (shared)
+│   └── notify.py               ← Send owner alert via WhatsApp (shared)
+├── platforms/
+│   ├── whatsapp.py             ← WhatsApp webhook handler + send function (v1)
+│   └── telegram.py             ← Telegram webhook handler + send function (v2)
+├── system-prompt.txt           ← Hotel prompt (owner edits this)
+├── requirements.txt            ← Python dependencies
+├── .env.example                ← Environment variable template (no secrets)
+├── .env                        ← Actual secrets (never committed to git)
+├── .gitignore                  ← Excludes .env, __pycache__, etc.
 ├── deploy/
-│   ├── hotel-bot.service   ← systemd unit file
-│   ├── nginx.conf          ← nginx reverse proxy config
-│   └── deploy.md           ← Step-by-step VPS setup guide
+│   ├── hotel-chat-bot.service  ← systemd unit file
+│   ├── nginx.conf              ← nginx reverse proxy config
+│   └── deploy.md               ← Step-by-step VPS setup guide
 ├── sql/
-│   └── schema.sql          ← Supabase table creation SQL
-├── test-messages.txt       ← Manual test script
+│   └── schema.sql              ← Supabase table creation SQL
+├── test-messages.txt           ← Manual test script
 └── docs/
-    ├── meta-setup.md       ← Meta WhatsApp Business API setup guide
+    ├── meta-setup.md           ← Meta WhatsApp Business API setup guide
     └── tech-requirements-python.md  ← This document
 ```
 
@@ -116,13 +129,14 @@ hotel-bot/
 ```sql
 CREATE TABLE conversations (
   id            BIGSERIAL PRIMARY KEY,
-  phone_number  TEXT NOT NULL,
+  platform      TEXT NOT NULL DEFAULT 'whatsapp',  -- 'whatsapp' | 'telegram'
+  sender_id     TEXT NOT NULL,                     -- phone number or Telegram chat_id
   messages      JSONB NOT NULL DEFAULT '[]',
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX conversations_phone_number_idx
-  ON conversations (phone_number);
+CREATE UNIQUE INDEX conversations_platform_sender_idx
+  ON conversations (platform, sender_id);
 ```
 
 **`messages` JSONB structure** (array of message objects):
@@ -135,23 +149,25 @@ CREATE UNIQUE INDEX conversations_phone_number_idx
 ]
 ```
 
-**Retention policy:** Keep last 20 messages per guest. Older messages are trimmed on each write to keep the array bounded.
+**Retention policy:** Keep last 20 messages per guest. Older messages are trimmed on each write.
+
+**Key change from v1:** The unique key is now `(platform, sender_id)` instead of just `phone_number`. This means the same guest can have separate conversation threads on WhatsApp and Telegram.
 
 ---
 
 ## 6. API Integrations
 
-### 6.1 Meta WhatsApp Business Cloud API
+### 6.1 Meta WhatsApp Business Cloud API (v1 POC)
 
 | Parameter | Detail |
 |---|---|
 | Endpoint | `https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages` |
 | Auth | Bearer token (permanent system user token) |
-| Webhook path | `POST /webhook` |
-| Webhook verification | `GET /webhook` — verify token handshake |
+| Webhook path | `POST /whatsapp/webhook` |
+| Webhook verification | `GET /whatsapp/webhook` — verify token handshake |
 | Inbound event | `messages` subscription |
 | Message type handled | `text` only (v1 — no media) |
-| Rate limit | 1,000 messages/second (not a concern at hotel scale) |
+| Signature verification | `X-Hub-Signature-256` HMAC on every POST |
 
 **Webhook payload (inbound message):**
 ```json
@@ -160,7 +176,7 @@ CREATE UNIQUE INDEX conversations_phone_number_idx
     "changes": [{
       "value": {
         "messages": [{
-          "from": "996XXXXXXXXX",
+          "from": "XXXXXXXXXXX",
           "text": { "body": "Здравствуйте" },
           "type": "text"
         }]
@@ -170,17 +186,39 @@ CREATE UNIQUE INDEX conversations_phone_number_idx
 }
 ```
 
-**Outbound send (reply to guest):**
+### 6.2 Telegram Bot API (v2)
+
+| Parameter | Detail |
+|---|---|
+| Endpoint | `https://api.telegram.org/bot{TOKEN}/sendMessage` |
+| Auth | Bot token in URL path (from BotFather) |
+| Webhook path | `POST /telegram/webhook` |
+| Webhook registration | One-time `setWebhook` call pointing to the VPS URL |
+| Inbound event | `message.text` updates |
+| Message type handled | `text` only (v1 — no media) |
+| Signature verification | `X-Telegram-Bot-Api-Secret-Token` header on every POST |
+| Setup effort | Simpler than WhatsApp — no business verification, no Meta approval |
+
+**Webhook payload (inbound message):**
 ```json
 {
-  "messaging_product": "whatsapp",
-  "to": "996XXXXXXXXX",
-  "type": "text",
-  "text": { "body": "Добрый день! Чем могу помочь?" }
+  "message": {
+    "chat": { "id": 123456789 },
+    "text": "Здравствуйте",
+    "from": { "first_name": "Айгуль" }
+  }
 }
 ```
 
-### 6.2 Anthropic Claude Haiku 3.5
+**Outbound send (reply to guest):**
+```json
+{
+  "chat_id": 123456789,
+  "text": "Добрый день! Чем могу помочь?"
+}
+```
+
+### 6.3 Anthropic Claude Haiku
 
 | Parameter | Detail |
 |---|---|
@@ -192,7 +230,7 @@ CREATE UNIQUE INDEX conversations_phone_number_idx
 | Cost | ~$0.80/1M input tokens, ~$4.00/1M output tokens |
 | Est. monthly cost | ~$1–2/month at 1,000 messages |
 
-### 6.3 Supabase Python Client
+### 6.4 Supabase Python Client
 
 | Parameter | Detail |
 |---|---|
@@ -208,20 +246,25 @@ CREATE UNIQUE INDEX conversations_phone_number_idx
 All secrets stored in `.env` on the VPS. Never committed to git.
 
 ```bash
-# Meta WhatsApp
-WHATSAPP_ACCESS_TOKEN=       # Permanent system user token
-WHATSAPP_PHONE_NUMBER_ID=    # Phone Number ID from Meta Developer Console
+# Meta WhatsApp (v1)
+WHATSAPP_ACCESS_TOKEN=        # Permanent system user token
+WHATSAPP_PHONE_NUMBER_ID=     # Phone Number ID from Meta Developer Console
 WHATSAPP_VERIFY_TOKEN=hotel-bot-verify-2026
+WHATSAPP_APP_SECRET=          # App secret for X-Hub-Signature-256 verification
 
-# Sister notification
-SISTER_PHONE_NUMBER=996XXXXXXXXX  # No + sign, no spaces
+# Owner notification
+OWNER_PHONE_NUMBER=XXXXXXXXXXX   # No + sign, no spaces
+
+# Telegram (v2)
+TELEGRAM_BOT_TOKEN=           # From BotFather (@BotFather on Telegram)
+TELEGRAM_WEBHOOK_SECRET=      # Random string — set when registering the webhook
 
 # Anthropic
-ANTHROPIC_API_KEY=           # From console.anthropic.com
+ANTHROPIC_API_KEY=            # From console.anthropic.com
 
 # Supabase
-SUPABASE_URL=                # https://xxxx.supabase.co
-SUPABASE_SERVICE_KEY=        # Service role key (not anon key)
+SUPABASE_URL=                 # https://xxxx.supabase.co
+SUPABASE_SERVICE_KEY=         # Service role key (not anon key)
 
 # App
 FLASK_ENV=production
@@ -232,58 +275,76 @@ PORT=8000
 
 ## 8. Application Logic
 
-### 8.1 Webhook Handler (`app.py`)
+### 8.1 Flask Routes (`app.py`)
 
 ```
-POST /webhook
-  1. Verify request is from Meta (check X-Hub-Signature-256 header)
+GET  /whatsapp/webhook    ← Meta webhook verification handshake
+POST /whatsapp/webhook    ← Inbound WhatsApp messages (v1)
+
+POST /telegram/webhook    ← Inbound Telegram messages (v2)
+
+GET  /health              ← Health check (returns 200 OK)
+```
+
+### 8.2 WhatsApp Webhook Handler (`platforms/whatsapp.py`)
+
+```
+POST /whatsapp/webhook:
+  1. Verify X-Hub-Signature-256 HMAC — reject if invalid
   2. Extract: sender phone number, message text, message type
-  3. Ignore non-text messages (images, voice notes, etc.) — return 200 OK
-  4. Ignore messages from the bot's own number (echo prevention)
-  5. Pass to bot.py → get reply text
-  6. Send reply to guest via Meta API
-  7. Return 200 OK to Meta (within 5 seconds — Meta retries if no 200)
-
-GET /webhook
-  1. Verify hub.verify_token matches WHATSAPP_VERIFY_TOKEN
-  2. Return hub.challenge if valid
+  3. Ignore non-text messages — return 200 OK
+  4. Ignore echo messages (from bot's own number)
+  5. Call core/bot.py handle_message(platform="whatsapp", sender_id, text)
+  6. Send reply via Meta Graph API
+  7. Return 200 OK (must respond within 5 seconds — Meta retries otherwise)
 ```
 
-### 8.2 Bot Logic (`bot.py`)
+### 8.3 Telegram Webhook Handler (`platforms/telegram.py`)
 
 ```
-handle_message(phone_number, message_text):
-  1. Load conversation history from Supabase (last 10 messages)
+POST /telegram/webhook:
+  1. Verify X-Telegram-Bot-Api-Secret-Token header — reject if invalid
+  2. Extract: chat_id, message text, message type
+  3. Ignore non-text updates (photos, stickers, etc.) — return 200 OK
+  4. Call core/bot.py handle_message(platform="telegram", sender_id=chat_id, text)
+  5. Send reply via Telegram sendMessage API
+  6. Return 200 OK
+```
+
+### 8.4 Core Bot Logic (`core/bot.py`)
+
+```
+handle_message(platform, sender_id, message_text) → reply_text:
+  1. Load conversation history from Supabase (platform + sender_id, last 10 messages)
   2. Append new user message to history
   3. Call Claude Haiku with system_prompt + history
   4. Append assistant reply to history
   5. Trim history to last 20 messages
-  6. Save updated history to Supabase (upsert)
+  6. Save updated history to Supabase (upsert on platform + sender_id)
   7. Check for booking intent keywords in message_text:
        ["забронировать", "бронь", "свободен", "book", "reserve", "хочу номер"]
-  8. If booking intent → call notify.py with phone_number + message_text + reply
+  8. If booking intent → call notify.py with sender_id + platform + message_text + reply
   9. Return reply text
 ```
 
-### 8.3 Booking Intent Detection
+### 8.5 Booking Intent & Owner Notification (`core/notify.py`)
 
-Simple keyword match on the incoming message (case-insensitive). When triggered:
-- Send a WhatsApp message to the sister's number with:
-  - Guest phone number
-  - Guest's message
-  - Bot's reply
+Simple keyword match on the incoming message (case-insensitive). When triggered, send a WhatsApp message to the owner's number with:
+- Guest identifier (phone number or Telegram name/chat_id)
+- Source platform (WhatsApp / Telegram)
+- Guest's message
+- Bot's reply
 
-This is a v1 implementation. A future version can use Claude to return structured JSON with `intent: booking` for more accurate detection.
-
-### 8.4 Session Memory (`db.py`)
+### 8.6 Session Memory (`core/db.py`)
 
 ```
-get_history(phone_number) → list[dict]
-  SELECT messages FROM conversations WHERE phone_number = $1
+get_history(platform, sender_id) → list[dict]
+  SELECT messages FROM conversations
+  WHERE platform = $1 AND sender_id = $2
   Returns [] if no row exists
 
-save_history(phone_number, messages: list[dict])
-  UPSERT into conversations (phone_number, messages, updated_at)
+save_history(platform, sender_id, messages: list[dict])
+  UPSERT into conversations (platform, sender_id, messages, updated_at)
   Trim messages to last 20 before saving
 ```
 
@@ -293,7 +354,8 @@ save_history(phone_number, messages: list[dict])
 
 | Requirement | Implementation |
 |---|---|
-| Webhook authenticity | Verify `X-Hub-Signature-256` HMAC on every POST |
+| WhatsApp webhook authenticity | Verify `X-Hub-Signature-256` HMAC on every POST |
+| Telegram webhook authenticity | Verify `X-Telegram-Bot-Api-Secret-Token` header on every POST |
 | Secrets management | `.env` file on VPS, never in git |
 | HTTPS only | nginx with Let's Encrypt certificate |
 | Supabase key | Service role key used server-side only |
@@ -329,18 +391,26 @@ cp .env.example .env
 nano .env
 
 # 6. Install systemd service
-cp deploy/hotel-bot.service /etc/systemd/system/
-systemctl enable hotel-bot
-systemctl start hotel-bot
+cp deploy/hotel-chat-bot.service /etc/systemd/system/
+systemctl enable hotel-chat-bot
+systemctl start hotel-chat-bot
 
 # 7. Configure nginx
-cp deploy/nginx.conf /etc/nginx/sites-available/hotel-bot
-ln -s /etc/nginx/sites-available/hotel-bot /etc/nginx/sites-enabled/
+cp deploy/nginx.conf /etc/nginx/sites-available/hotel-chat-bot
+ln -s /etc/nginx/sites-available/hotel-chat-bot /etc/nginx/sites-enabled/
 certbot --nginx -d yourdomain.com
 systemctl reload nginx
 ```
 
-### 10.2 Updating the Bot
+### 10.2 Register Telegram Webhook (one-time, after VPS is live)
+
+```bash
+curl "https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook" \
+  -d "url=https://yourdomain.com/telegram/webhook" \
+  -d "secret_token={TELEGRAM_WEBHOOK_SECRET}"
+```
+
+### 10.3 Updating the Bot
 
 ```bash
 # On VPS
@@ -349,15 +419,15 @@ cd hotel-chat-bot
 git pull
 source venv/bin/activate
 pip install -r requirements.txt  # if deps changed
-systemctl restart hotel-bot
+systemctl restart hotel-chat-bot
 ```
 
-### 10.3 Updating the System Prompt (No Redeploy Needed)
+### 10.4 Updating the System Prompt (No Redeploy Needed)
 
 Edit `system-prompt.txt` on the VPS and restart the service:
 ```bash
 nano system-prompt.txt
-systemctl restart hotel-bot
+systemctl restart hotel-chat-bot
 ```
 
 ---
@@ -373,6 +443,8 @@ python-dotenv==1.0.1
 requests==2.31.0
 ```
 
+No extra library needed for Telegram — the Bot API is plain HTTP (handled by `requests`).
+
 ---
 
 ## 12. Cost Summary
@@ -383,14 +455,17 @@ requests==2.31.0
 | Domain (optional) | ~$1 (amortized) |
 | Supabase | $0 (free tier) |
 | Meta WhatsApp service conversations | $0 (free for inbound) |
+| Telegram | $0 (Bot API is free) |
 | Anthropic Claude Haiku (1,000 msg) | ~$2 |
 | **Total** | **~$7–8/month** |
 
-At 5,000 messages/month (busier season): ~$15–20/month.
+At 5,000 messages/month across both platforms: ~$15–20/month.
 
 ---
 
 ## 13. Functional Requirements
+
+### v1 — WhatsApp POC
 
 | ID | Requirement |
 |---|---|
@@ -398,12 +473,20 @@ At 5,000 messages/month (busier season): ~$15–20/month.
 | FR-2 | Bot answers FAQs: prices, room types, check-in/out, amenities, directions |
 | FR-3 | Bot detects booking intent via keyword matching |
 | FR-4 | Bot collects: guest name, check-in date, check-out date, number of guests |
-| FR-5 | Bot notifies sister via WhatsApp when booking intent is detected |
+| FR-5 | Bot notifies owner via WhatsApp when booking intent is detected |
 | FR-6 | Bot responds in Kyrgyz if guest writes in Kyrgyz |
 | FR-7 | Bot responds in English if guest writes in English |
 | FR-8 | Bot never shares payment details |
 | FR-9 | Conversation history persists across messages (Supabase) |
 | FR-10 | System prompt is editable without redeploying code |
+
+### v2 — Telegram Addition
+
+| ID | Requirement |
+|---|---|
+| FR-11 | Same FAQ + booking flow available on Telegram |
+| FR-12 | Conversation history is per-platform (WhatsApp and Telegram threads are independent) |
+| FR-13 | Owner notification includes source platform (WhatsApp vs Telegram) |
 
 ---
 
@@ -412,17 +495,17 @@ At 5,000 messages/month (busier season): ~$15–20/month.
 | ID | Requirement |
 |---|---|
 | NFR-1 | Uptime: 99%+ (systemd auto-restart) |
-| NFR-2 | Response time: under 5 seconds end-to-end |
-| NFR-3 | Cost: under $20/month at peak season volume |
+| NFR-2 | Response time: under 5 seconds end-to-end on both platforms |
+| NFR-3 | Cost: under $20/month at peak volume across both platforms |
 | NFR-4 | All secrets in environment variables, never in code |
-| NFR-5 | HTTPS required (Meta webhook requirement) |
-| NFR-6 | Webhook signature verification on every request |
+| NFR-5 | HTTPS required (Meta and Telegram webhook requirement) |
+| NFR-6 | Webhook signature verification on every inbound request |
 
 ---
 
-## 15. Out of Scope (v1)
+## 15. Out of Scope
 
-- Voice/phone call handling (Phase 2 — VAPI + Zadarma)
+- Voice/phone call handling (Phase 3 — VAPI + Zadarma)
 - Media messages (images, voice notes, documents)
 - Booking calendar / availability database
 - Payment processing
