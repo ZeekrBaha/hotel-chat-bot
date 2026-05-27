@@ -42,3 +42,11 @@ def test_send_owner_alert_sends_to_owner_number():
         send_owner_alert("79991234567", "whatsapp", "msg", "reply")
     payload = mock_post.call_args.kwargs["json"]
     assert payload["to"] == "79991234567"   # OWNER_PHONE_NUMBER from conftest
+
+
+def test_send_owner_alert_uses_timeout():
+    with patch("core.notify.requests.post") as mock_post:
+        mock_post.return_value.raise_for_status = lambda: None
+        send_owner_alert("79991234567", "whatsapp", "msg", "reply")
+    _, kwargs = mock_post.call_args
+    assert kwargs.get("timeout") == (3, 10)

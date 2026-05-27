@@ -82,3 +82,16 @@ def test_send_reply_sends_correct_payload():
     assert payload["to"] == "79991234567"
     assert payload["text"]["body"] == "Добрый день!"
     assert payload["messaging_product"] == "whatsapp"
+
+
+def test_verify_signature_rejects_empty_secret():
+    payload = b"data"
+    sig = _make_sig("", payload)   # valid sig for empty secret
+    assert verify_signature(payload, sig, "") is False
+
+
+def test_send_reply_uses_timeout():
+    with patch("platforms.whatsapp.requests.post") as mock_post:
+        send_reply("79991234567", "Добрый день!")
+    _, kwargs = mock_post.call_args
+    assert kwargs.get("timeout") == (3, 10)

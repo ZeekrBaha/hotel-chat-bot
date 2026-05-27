@@ -71,6 +71,23 @@ def test_handle_message_appends_user_and_assistant_to_history():
     assert saved["messages"][-1] == {"role": "assistant", "content": FAKE_REPLY}
 
 
+def test_openai_client_configured_with_timeout_and_retries():
+    """_get_openai_client() should build client with timeout=10.0 and max_retries=2."""
+    import core.bot as bot_module
+    # Reset the cached singleton
+    bot_module._openai_client = None
+    with patch("core.bot.OpenAI") as mock_cls:
+        mock_cls.return_value = MagicMock()
+        bot_module._get_openai_client()
+    mock_cls.assert_called_once_with(
+        api_key="test-openai-key",
+        timeout=10.0,
+        max_retries=2,
+    )
+    # Reset so other tests get a clean slate
+    bot_module._openai_client = None
+
+
 def test_handle_message_passes_last_10_messages_to_openai():
     long_history = [{"role": "user", "content": str(i)} for i in range(15)]
     mock_openai = MagicMock()

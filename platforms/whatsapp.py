@@ -15,6 +15,8 @@ def parse_inbound(payload: dict) -> tuple[str, str] | None:
 
 
 def verify_signature(payload_bytes: bytes, signature_header: str, secret: str) -> bool:
+    if not secret:
+        return False
     if not signature_header.startswith("sha256="):
         return False
     expected = hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
@@ -34,4 +36,5 @@ def send_reply(phone_number: str, text: str) -> None:
             "type": "text",
             "text": {"body": text},
         },
+        timeout=(3, 10),
     )

@@ -122,6 +122,26 @@ def test_whatsapp_inbound_sends_owner_alert_on_booking_intent(client):
     )
 
 
+def test_whatsapp_inbound_sends_reply_even_if_owner_alert_fails(client):
+    payload = json.dumps(_inbound_payload(text="Хочу забронировать")).encode()
+    sig = _sign(payload, "test-app-secret")
+
+    with patch("app.bot.handle_message", return_value="Уточните даты."), \
+         patch("app.bot.is_booking_intent", return_value=True), \
+         patch("app.notify.send_owner_alert", side_effect=Exception("network error")), \
+         patch("app.whatsapp.send_reply") as mock_send:
+
+        response = client.post(
+            "/whatsapp/webhook",
+            data=payload,
+            content_type="application/json",
+            headers={"X-Hub-Signature-256": sig},
+        )
+
+    assert response.status_code == 200
+    mock_send.assert_called_once_with("79991234567", "Уточните даты.")
+
+
 def test_whatsapp_inbound_returns_200_for_non_text_message(client):
     payload = json.dumps({
         "entry": [{"changes": [{"value": {"messages": [{"from": "123", "type": "image"}]}}]}]

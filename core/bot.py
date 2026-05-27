@@ -14,7 +14,11 @@ _openai_client: OpenAI | None = None
 def _get_openai_client() -> OpenAI:
     global _openai_client
     if _openai_client is None:
-        _openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        _openai_client = OpenAI(
+            api_key=os.environ["OPENAI_API_KEY"],
+            timeout=10.0,
+            max_retries=2,
+        )
     return _openai_client
 
 

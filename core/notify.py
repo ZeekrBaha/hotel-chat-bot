@@ -26,5 +26,6 @@ def send_owner_alert(
             "type": "text",
             "text": {"body": body},
         },
+        timeout=(3, 10),
     )
     response.raise_for_status()
