@@ -1,7 +1,8 @@
 import hashlib
 import hmac as hmac_module
 from unittest.mock import patch
-from platforms.whatsapp import parse_inbound, verify_signature, send_reply
+from platforms.whatsapp import parse_inbound, verify_signature, send_reply, is_duplicate
+import platforms.whatsapp as wa_module
 
 # --- parse_inbound ---
 
@@ -10,6 +11,7 @@ VALID_PAYLOAD = {
         "changes": [{
             "value": {
                 "messages": [{
+                    "id": "wamid.test123",
                     "from": "79991234567",
                     "type": "text",
                     "text": {"body": "Здравствуйте"},
@@ -20,10 +22,11 @@ VALID_PAYLOAD = {
 }
 
 
-def test_parse_inbound_returns_phone_and_text():
-    phone, text = parse_inbound(VALID_PAYLOAD)
+def test_parse_inbound_returns_phone_text_and_message_id():
+    phone, text, message_id = parse_inbound(VALID_PAYLOAD)
     assert phone == "79991234567"
     assert text == "Здравствуйте"
+    assert message_id == "wamid.test123"
 
 
 def test_parse_inbound_returns_none_for_non_text_message():
@@ -95,3 +98,22 @@ def test_send_reply_uses_timeout():
         send_reply("79991234567", "Добрый день!")
     _, kwargs = mock_post.call_args
     assert kwargs.get("timeout") == (3, 10)
+
+
+# --- is_duplicate ---
+
+def test_is_duplicate_returns_false_first_time():
+    wa_module._seen_message_ids.clear()
+    assert is_duplicate("wamid.unique1") is False
+
+
+def test_is_duplicate_returns_true_second_time():
+    wa_module._seen_message_ids.clear()
+    is_duplicate("wamid.unique2")
+    assert is_duplicate("wamid.unique2") is True
+
+
+def test_is_duplicate_different_ids_not_duplicate():
+    wa_module._seen_message_ids.clear()
+    is_duplicate("wamid.a")
+    assert is_duplicate("wamid.b") is False

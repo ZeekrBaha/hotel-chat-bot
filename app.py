@@ -1,4 +1,5 @@
 import os
+from threading import Thread
 from flask import Flask, request
 from core import bot, notify
 from platforms import whatsapp
@@ -36,6 +37,19 @@ def whatsapp_verify():
     return "Forbidden", 403
 
 
+def _process_whatsapp(payload: dict, phone: str, text: str) -> None:
+    try:
+        reply = bot.handle_message("whatsapp", phone, text)
+        whatsapp.send_reply(phone, reply)
+        if bot.is_booking_intent(text):
+            try:
+                notify.send_owner_alert(phone, "whatsapp", text, reply)
+            except Exception:
+                app.logger.exception("owner alert failed for %s", phone[:4] + "****")
+    except Exception:
+        app.logger.exception("error processing whatsapp message from %s", phone[:4] + "****")
+
+
 @app.post("/whatsapp/webhook")
 def whatsapp_inbound():
     sig = request.headers.get("X-Hub-Signature-256", "")
@@ -46,15 +60,10 @@ def whatsapp_inbound():
     if parsed is None:
         return "", 200
 
-    phone, text = parsed
-    reply = bot.handle_message("whatsapp", phone, text)
+    phone, text, message_id = parsed
 
-    whatsapp.send_reply(phone, reply)
+    if whatsapp.is_duplicate(message_id):
+        return "", 200
 
-    if bot.is_booking_intent(text):
-        try:
-            notify.send_owner_alert(phone, "whatsapp", text, reply)
-        except Exception:
-            app.logger.exception("owner alert failed for %s", phone[:4] + "****")
-
+    Thread(target=_process_whatsapp, args=(request.json, phone, text), daemon=True).start()
     return "", 200

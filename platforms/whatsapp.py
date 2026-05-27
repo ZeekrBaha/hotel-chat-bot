@@ -4,12 +4,27 @@ import os
 import requests
 
 
-def parse_inbound(payload: dict) -> tuple[str, str] | None:
+_seen_message_ids: set[str] = set()
+_SEEN_MAX = 512
+
+
+def is_duplicate(message_id: str) -> bool:
+    """Return True if this message_id was already processed."""
+    if message_id in _seen_message_ids:
+        return True
+    if len(_seen_message_ids) >= _SEEN_MAX:
+        _seen_message_ids.clear()
+    _seen_message_ids.add(message_id)
+    return False
+
+
+def parse_inbound(payload: dict) -> tuple[str, str, str] | None:
+    """Returns (phone, text, message_id) or None."""
     try:
         message = payload["entry"][0]["changes"][0]["value"]["messages"][0]
         if message["type"] != "text":
             return None
-        return message["from"], message["text"]["body"]
+        return message["from"], message["text"]["body"], message["id"]
     except (KeyError, IndexError):
         return None
 
