@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 from supabase import create_client, Client
@@ -28,6 +29,35 @@ def get_history(platform: str, sender_id: str) -> list[dict]:
     if result.data:
         return result.data[0]["messages"]
     return []
+
+
+def increment_daily_counter(platform: str, sender_id: str) -> int:
+    """Increment messages_today, resetting if the date has changed. Returns new count."""
+    today = datetime.date.today().isoformat()
+    client = get_client()
+    result = (
+        client.table("conversations")
+        .select("messages_today, counter_reset_at")
+        .eq("platform", platform)
+        .eq("sender_id", sender_id)
+        .execute()
+    )
+    if not result.data:
+        return 1  # row will be created by save_history; first message counts as 1
+    row = result.data[0]
+    reset_date = (row.get("counter_reset_at") or "")[:10]
+    if reset_date < today:
+        new_count = 1
+        client.table("conversations").update({
+            "messages_today": 1,
+            "counter_reset_at": f"{today}T00:00:00Z",
+        }).eq("platform", platform).eq("sender_id", sender_id).execute()
+    else:
+        new_count = (row.get("messages_today") or 0) + 1
+        client.table("conversations").update({
+            "messages_today": new_count,
+        }).eq("platform", platform).eq("sender_id", sender_id).execute()
+    return new_count
 
 
 def save_history(platform: str, sender_id: str, messages: list[dict]) -> None:

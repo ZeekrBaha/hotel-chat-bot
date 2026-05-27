@@ -54,6 +54,39 @@ def test_save_history_trims_to_last_20_messages():
     assert saved[-1]["content"] == "24"
 
 
+def test_increment_daily_counter_returns_1_for_new_conversation():
+    import core.db as db_module
+    mock_client = MagicMock()
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+    with patch("core.db.get_client", return_value=mock_client):
+        count = db_module.increment_daily_counter("whatsapp", "79991234567")
+    assert count == 1
+
+
+def test_increment_daily_counter_increments_same_day():
+    import core.db as db_module
+    mock_client = MagicMock()
+    today = __import__("datetime").date.today().isoformat()
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+        {"messages_today": 5, "counter_reset_at": f"{today}T10:00:00Z"}
+    ]
+    with patch("core.db.get_client", return_value=mock_client):
+        count = db_module.increment_daily_counter("whatsapp", "79991234567")
+    assert count == 6
+
+
+def test_increment_daily_counter_resets_on_new_day():
+    import core.db as db_module
+    mock_client = MagicMock()
+    yesterday = "2000-01-01"
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+        {"messages_today": 40, "counter_reset_at": f"{yesterday}T10:00:00Z"}
+    ]
+    with patch("core.db.get_client", return_value=mock_client):
+        count = db_module.increment_daily_counter("whatsapp", "79991234567")
+    assert count == 1
+
+
 def test_get_client_returns_singleton():
     import core.db as db_module
     db_module._supabase_client = None

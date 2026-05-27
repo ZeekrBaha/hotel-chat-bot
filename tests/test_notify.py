@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from core.notify import send_owner_alert
+from core.notify import send_owner_alert, send_escalation_alert
 
 BOOKING = {
     "guest_name": "Айгуль",
@@ -55,6 +55,16 @@ def test_send_owner_alert_uses_timeout():
         _mock_post_setup(mock_post)
         send_owner_alert("79991234567", "whatsapp", BOOKING)
     assert mock_post.call_args.kwargs["timeout"] == (3, 10)
+
+
+def test_send_escalation_alert_notifies_owner():
+    with patch("core.notify.requests.post") as mock_post:
+        _mock_post_setup(mock_post)
+        send_escalation_alert("79991234567", "whatsapp")
+    mock_post.assert_called_once()
+    body = mock_post.call_args.kwargs["json"]["text"]["body"]
+    assert "79991234567" in body
+    assert "whatsapp" in body
 
 
 def test_send_owner_alert_raises_on_meta_api_error_in_body():

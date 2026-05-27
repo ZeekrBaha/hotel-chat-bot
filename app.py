@@ -78,7 +78,12 @@ def _process_whatsapp(payload: dict, phone: str, text: str, message_id: str) -> 
     try:
         result = bot.handle_message("whatsapp", phone, text)
         whatsapp.send_reply(phone, result["reply"])
-        if _booking_complete(result):
+        if result.get("escalated"):
+            try:
+                notify.send_escalation_alert(phone, "whatsapp")
+            except Exception:
+                _logger.exception("escalation_alert_failed phone=%s", phone_hash)
+        elif _booking_complete(result):
             try:
                 notify.send_owner_alert(phone, "whatsapp", {
                     "guest_name": result["guest_name"],

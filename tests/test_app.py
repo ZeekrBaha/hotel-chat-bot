@@ -25,6 +25,7 @@ def _bot_result(
     check_in: str | None = None,
     check_out: str | None = None,
     num_guests: int | None = None,
+    escalated: bool = False,
 ) -> dict:
     return {
         "reply": reply,
@@ -33,6 +34,7 @@ def _bot_result(
         "check_in": check_in,
         "check_out": check_out,
         "num_guests": num_guests,
+        "escalated": escalated,
     }
 
 
@@ -219,6 +221,32 @@ def test_whatsapp_inbound_sends_reply_even_if_owner_alert_fails(client):
 
     assert response.status_code == 200
     mock_send.assert_called_once_with("79991234567", "Ваша бронь подтверждена.")
+
+
+def test_whatsapp_inbound_sends_escalation_alert_when_limit_exceeded(client):
+    import platforms.whatsapp as wa_module
+    wa_module._seen_message_ids.clear()
+
+    payload = json.dumps(_inbound_payload(msg_id="wamid.esc1")).encode()
+    sig = _sign(payload, "test-app-secret")
+
+    with patch("app.Thread", _SyncThread), \
+         patch("app.bot.handle_message", return_value=_bot_result(
+             "Передаю администратору.", escalated=True
+         )), \
+         patch("app.whatsapp.send_reply") as mock_send, \
+         patch("app.notify.send_escalation_alert") as mock_escalate:
+
+        response = client.post(
+            "/whatsapp/webhook",
+            data=payload,
+            content_type="application/json",
+            headers={"X-Hub-Signature-256": sig},
+        )
+
+    assert response.status_code == 200
+    mock_send.assert_called_once_with("79991234567", "Передаю администратору.")
+    mock_escalate.assert_called_once_with("79991234567", "whatsapp")
 
 
 def test_whatsapp_inbound_returns_200_for_non_text_message(client):

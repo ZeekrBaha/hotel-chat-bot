@@ -12,6 +12,8 @@ BOOKING_KEYWORDS = [
     "book", "reserve", "бронирование",
 ]
 CONTEXT_WINDOW = 10
+DAILY_MESSAGE_LIMIT = 50
+ESCALATION_REPLY = "Ваш запрос передан администратору. Пожалуйста, ожидайте ответа."
 _logger = logging.getLogger(__name__)
 _openai_client: OpenAI | None = None
 
@@ -70,7 +72,21 @@ def is_booking_intent(message_text: str) -> bool:
     return any(kw in text_lower for kw in BOOKING_KEYWORDS)
 
 
+def _null_booking() -> dict:
+    return {"guest_name": None, "check_in": None, "check_out": None, "num_guests": None}
+
+
 def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
+    daily_count = db.increment_daily_counter(platform, sender_id)
+    if daily_count > DAILY_MESSAGE_LIMIT:
+        _logger.warning("daily_limit_exceeded platform=%s sender=%s count=%d", platform, sender_id[:4] + "****", daily_count)
+        return {
+            "reply": ESCALATION_REPLY,
+            "is_booking_intent": False,
+            "escalated": True,
+            **_null_booking(),
+        }
+
     history = db.get_history(platform, sender_id)
     history.append({"role": "user", "content": message_text})
 
@@ -114,4 +130,5 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
         "check_in": parsed.get("check_in"),
         "check_out": parsed.get("check_out"),
         "num_guests": parsed.get("num_guests"),
+        "escalated": False,
     }
