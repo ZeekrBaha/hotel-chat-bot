@@ -18,6 +18,10 @@ def _sign(payload: bytes, secret: str) -> str:
     return f"sha256={h.hexdigest()}"
 
 
+def _bot_result(reply: str, is_booking: bool = False, guest_name: str | None = None) -> dict:
+    return {"reply": reply, "is_booking_intent": is_booking, "guest_name": guest_name}
+
+
 # --- GET /health ---
 
 def test_health_returns_200(client):
@@ -100,9 +104,8 @@ def test_whatsapp_inbound_returns_200_and_calls_bot(client):
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
-         patch("app.bot.handle_message", return_value="Добрый день!") as mock_bot, \
-         patch("app.whatsapp.send_reply") as mock_send, \
-         patch("app.bot.is_booking_intent", return_value=False):
+         patch("app.bot.handle_message", return_value=_bot_result("Добрый день!")) as mock_bot, \
+         patch("app.whatsapp.send_reply") as mock_send:
 
         response = client.post(
             "/whatsapp/webhook",
@@ -124,9 +127,8 @@ def test_whatsapp_inbound_sends_owner_alert_on_booking_intent(client):
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
-         patch("app.bot.handle_message", return_value="Уточните даты."), \
+         patch("app.bot.handle_message", return_value=_bot_result("Уточните даты.", is_booking=True)), \
          patch("app.whatsapp.send_reply"), \
-         patch("app.bot.is_booking_intent", return_value=True), \
          patch("app.notify.send_owner_alert") as mock_notify:
 
         client.post(
@@ -149,8 +151,7 @@ def test_whatsapp_inbound_sends_reply_even_if_owner_alert_fails(client):
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
-         patch("app.bot.handle_message", return_value="Уточните даты."), \
-         patch("app.bot.is_booking_intent", return_value=True), \
+         patch("app.bot.handle_message", return_value=_bot_result("Уточните даты.", is_booking=True)), \
          patch("app.notify.send_owner_alert", side_effect=Exception("network error")), \
          patch("app.whatsapp.send_reply") as mock_send:
 
@@ -191,9 +192,8 @@ def test_whatsapp_inbound_deduplicates_retried_message(client):
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
-         patch("app.bot.handle_message", return_value="reply") as mock_bot, \
-         patch("app.whatsapp.send_reply"), \
-         patch("app.bot.is_booking_intent", return_value=False):
+         patch("app.bot.handle_message", return_value=_bot_result("reply")) as mock_bot, \
+         patch("app.whatsapp.send_reply"):
         # First call — processes
         client.post("/whatsapp/webhook", data=payload,
                     content_type="application/json",
@@ -204,4 +204,4 @@ def test_whatsapp_inbound_deduplicates_retried_message(client):
                                headers={"X-Hub-Signature-256": sig})
 
     assert response.status_code == 200
-    assert mock_bot.call_count == 1  # only called once, not twice
+    assert mock_bot.call_count == 1

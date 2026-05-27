@@ -1,3 +1,4 @@
+import json
 import os
 from openai import OpenAI
 from core import db
@@ -9,6 +10,26 @@ BOOKING_KEYWORDS = [
 CONTEXT_WINDOW = 10
 
 _openai_client: OpenAI | None = None
+
+_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "hotel_bot_response",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "reply": {"type": "string"},
+                "is_booking_intent": {"type": "boolean"},
+                "guest_name": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}]
+                },
+            },
+            "required": ["reply", "is_booking_intent", "guest_name"],
+            "additionalProperties": False,
+        },
+    },
+}
 
 
 def _get_openai_client() -> OpenAI:
@@ -33,7 +54,7 @@ def is_booking_intent(message_text: str) -> bool:
     return any(kw in text_lower for kw in BOOKING_KEYWORDS)
 
 
-def handle_message(platform: str, sender_id: str, message_text: str) -> str:
+def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
     history = db.get_history(platform, sender_id)
     history.append({"role": "user", "content": message_text})
 
@@ -41,14 +62,28 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> str:
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=400,
+        response_format=_RESPONSE_FORMAT,
         messages=[
             {"role": "system", "content": get_system_prompt()},
             *history[-CONTEXT_WINDOW:],
         ],
     )
-    reply = response.choices[0].message.content or "Извините, не могу ответить на этот вопрос."
+    raw = response.choices[0].message.content or "{}"
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        parsed = {}
+
+    reply = parsed.get("reply") or "Извините, не могу ответить на этот вопрос."
+    # Keyword list as safety net: fire if LLM missed the intent
+    booking_intent = parsed.get("is_booking_intent", False) or is_booking_intent(message_text)
+    guest_name = parsed.get("guest_name")
 
     history.append({"role": "assistant", "content": reply})
     db.save_history(platform, sender_id, history)
 
-    return reply
+    return {
+        "reply": reply,
+        "is_booking_intent": booking_intent,
+        "guest_name": guest_name,
+    }

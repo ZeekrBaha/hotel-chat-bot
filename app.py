@@ -39,11 +39,11 @@ def whatsapp_verify():
 
 def _process_whatsapp(payload: dict, phone: str, text: str) -> None:
     try:
-        reply = bot.handle_message("whatsapp", phone, text)
-        whatsapp.send_reply(phone, reply)
-        if bot.is_booking_intent(text):
+        result = bot.handle_message("whatsapp", phone, text)
+        whatsapp.send_reply(phone, result["reply"])
+        if result["is_booking_intent"]:
             try:
-                notify.send_owner_alert(phone, "whatsapp", text, reply)
+                notify.send_owner_alert(phone, "whatsapp", text, result["reply"])
             except Exception:
                 app.logger.exception("owner alert failed for %s", phone[:4] + "****")
     except Exception:
