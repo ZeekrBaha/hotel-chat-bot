@@ -7,7 +7,9 @@ User=hotelbot
 WorkingDirectory=/home/hotelbot/hotel-chat-bot
 EnvironmentFile=/home/hotelbot/hotel-chat-bot/.env
 ExecStart=/home/hotelbot/hotel-chat-bot/venv/bin/gunicorn \
-    --workers 2 \
+    --workers 4 \
+    --worker-class gthread \
+    --threads 4 \
     --bind 127.0.0.1:8000 \
     --access-logfile - \
     --error-logfile - \
