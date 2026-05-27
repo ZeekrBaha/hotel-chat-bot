@@ -12,6 +12,7 @@ ExecStart=/home/hotelbot/hotel-chat-bot/venv/bin/gunicorn \
     --worker-class gthread \
     --threads 4 \
     --bind 127.0.0.1:8000 \
+    --graceful-timeout 60 \
     --access-logfile - \
     --error-logfile - \
     app:app

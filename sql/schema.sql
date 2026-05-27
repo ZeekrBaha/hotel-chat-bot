@@ -42,7 +42,7 @@ BEGIN
     WHERE platform = p_platform AND sender_id = p_sender_id
     RETURNING messages_today INTO v_count;
   IF NOT FOUND THEN
-    v_count := 1;  -- row not yet created; save_history upsert will materialise it
+    v_count := 1;  -- row not yet created; append_conversation_turn will materialise it
   END IF;
   RETURN v_count;
 END;

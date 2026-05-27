@@ -36,6 +36,9 @@ _logger = logging.getLogger(__name__)
 
 _inflight: set[threading.Thread] = set()
 _inflight_lock = threading.Lock()
+# Capture gunicorn's original SIGTERM handler at import time.
+# Assumes gunicorn --worker-class gthread (which initializes signals before importing WSGI app).
+# This coupling only works for gthread; sync/eventlet/uvicorn workers may behave differently.
 _orig_sigterm = signal.getsignal(signal.SIGTERM)
 
 
