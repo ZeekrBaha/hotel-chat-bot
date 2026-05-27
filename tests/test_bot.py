@@ -81,7 +81,7 @@ def test_handle_message_calls_openai_with_system_prompt_and_history():
     mock_openai.chat.completions.create.assert_called_once()
     call_kwargs = mock_openai.chat.completions.create.call_args.kwargs
     assert call_kwargs["model"] == "gpt-4o-mini"
-    assert call_kwargs["max_tokens"] == 400
+    assert call_kwargs["max_completion_tokens"] == 400
     assert call_kwargs["messages"][0]["role"] == "system"
     assert FAKE_PROMPT in call_kwargs["messages"][0]["content"]
     assert result["reply"] == FAKE_REPLY
@@ -151,7 +151,8 @@ def test_handle_message_uses_structured_output_response_format():
     assert call_kwargs["response_format"]["type"] == "json_schema"
 
 
-def test_handle_message_keyword_fallback_fires_when_llm_misses_intent():
+def test_handle_message_trusts_llm_over_keywords():
+    """When LLM says False, result is False even if a booking keyword is present."""
     mock_openai = MagicMock()
     mock_openai.chat.completions.create.return_value = _mock_structured_response(FAKE_REPLY, False)
 
@@ -164,7 +165,7 @@ def test_handle_message_keyword_fallback_fires_when_llm_misses_intent():
 
         result = handle_message("whatsapp", "79991234567", "Хочу забронировать номер")
 
-    assert result["is_booking_intent"] is True
+    assert result["is_booking_intent"] is False
 
 
 def test_handle_message_injects_todays_date_in_system_prompt():
@@ -222,6 +223,15 @@ def test_handle_message_skips_openai_when_daily_limit_exceeded():
         handle_message("whatsapp", "79991234567", "ещё один вопрос")
 
     mock_openai.chat.completions.create.assert_not_called()
+
+
+def test_handle_message_escalated_false_after_transition():
+    """Messages well past the limit (count > 51) still return escalation reply but escalated=False."""
+    with patch("core.bot.db.increment_daily_counter", return_value=55):
+        result = handle_message("whatsapp", "79991234567", "ещё один вопрос")
+
+    assert result["escalated"] is False
+    assert result["reply"] == "Ваш запрос передан администратору. Пожалуйста, ожидайте ответа."
 
 
 def test_openai_client_configured_with_timeout_and_retries():

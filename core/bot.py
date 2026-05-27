@@ -64,7 +64,8 @@ def get_system_prompt() -> str:
 
 
 def _today() -> str:
-    return datetime.date.today().strftime("%d.%m.%Y")
+    from zoneinfo import ZoneInfo
+    return datetime.datetime.now(ZoneInfo(os.environ.get("HOTEL_TZ", "Asia/Bishkek"))).date().strftime("%d.%m.%Y")
 
 
 def is_booking_intent(message_text: str) -> bool:
@@ -83,7 +84,7 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
         return {
             "reply": ESCALATION_REPLY,
             "is_booking_intent": False,
-            "escalated": True,
+            "escalated": daily_count == DAILY_MESSAGE_LIMIT + 1,
             **_null_booking(),
         }
 
@@ -95,7 +96,7 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
     system_prompt = f"Сегодня: {_today()}\n\n{get_system_prompt()}"
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=400,
+        max_completion_tokens=400,
         response_format=_RESPONSE_FORMAT,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -114,11 +115,12 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
     raw = response.choices[0].message.content or "{}"
     try:
         parsed = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError) as e:
+        _logger.error("json_parse_failed raw=%r err=%s", raw[:200], e)
         parsed = {}
 
     reply = parsed.get("reply") or "Извините, не могу ответить на этот вопрос."
-    booking_intent = parsed.get("is_booking_intent", False) or is_booking_intent(message_text)
+    booking_intent = parsed.get("is_booking_intent", False)
 
     history.append({"role": "assistant", "content": reply})
     db.save_history(platform, sender_id, history)

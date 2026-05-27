@@ -43,8 +43,8 @@ def _complete_booking_result(reply: str = "Бронь подтверждена."
         reply=reply,
         is_booking=True,
         guest_name="Айгуль",
-        check_in="05.06.2026",
-        check_out="07.06.2026",
+        check_in="2026-06-05",
+        check_out="2026-06-07",
         num_guests=2,
     )
 
@@ -124,15 +124,13 @@ class _SyncThread:
 
 
 def test_whatsapp_inbound_returns_200_and_calls_bot(client):
-    import platforms.whatsapp as wa_module
-    wa_module._seen_message_ids.clear()
-
     payload = json.dumps(_inbound_payload(msg_id="wamid.bot1")).encode()
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
+         patch("app.db.is_duplicate_message", return_value=False), \
          patch("app.bot.handle_message", return_value=_bot_result("Добрый день!")) as mock_bot, \
-         patch("app.whatsapp.send_reply") as mock_send:
+         patch("app.whatsapp.send_reply", return_value=True) as mock_send:
 
         response = client.post(
             "/whatsapp/webhook",
@@ -147,15 +145,14 @@ def test_whatsapp_inbound_returns_200_and_calls_bot(client):
 
 
 def test_whatsapp_inbound_sends_alert_when_all_booking_slots_filled(client):
-    import platforms.whatsapp as wa_module
-    wa_module._seen_message_ids.clear()
-
     payload = json.dumps(_inbound_payload(text="Айгуль, 5-7 июня, 2 человека", msg_id="wamid.alert1")).encode()
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
+         patch("app.db.is_duplicate_message", return_value=False), \
          patch("app.bot.handle_message", return_value=_complete_booking_result()), \
-         patch("app.whatsapp.send_reply"), \
+         patch("app.whatsapp.send_reply", return_value=True), \
+         patch("app.db.check_and_set_booking_alert", return_value=True), \
          patch("app.notify.send_owner_alert") as mock_notify:
 
         client.post(
@@ -170,24 +167,42 @@ def test_whatsapp_inbound_sends_alert_when_all_booking_slots_filled(client):
         "whatsapp",
         {
             "guest_name": "Айгуль",
-            "check_in": "05.06.2026",
-            "check_out": "07.06.2026",
+            "check_in": "2026-06-05",
+            "check_out": "2026-06-07",
             "num_guests": 2,
         },
     )
 
 
 def test_whatsapp_inbound_no_alert_when_booking_slots_incomplete(client):
-    import platforms.whatsapp as wa_module
-    wa_module._seen_message_ids.clear()
-
     payload = json.dumps(_inbound_payload(text="Хочу забронировать", msg_id="wamid.partial1")).encode()
     sig = _sign(payload, "test-app-secret")
 
-    # booking intent but missing check_in/check_out/num_guests
     with patch("app.Thread", _SyncThread), \
+         patch("app.db.is_duplicate_message", return_value=False), \
          patch("app.bot.handle_message", return_value=_bot_result("Уточните даты.", is_booking=True)), \
-         patch("app.whatsapp.send_reply"), \
+         patch("app.whatsapp.send_reply", return_value=True), \
+         patch("app.notify.send_owner_alert") as mock_notify:
+
+        client.post(
+            "/whatsapp/webhook",
+            data=payload,
+            content_type="application/json",
+            headers={"X-Hub-Signature-256": sig},
+        )
+
+    mock_notify.assert_not_called()
+
+
+def test_whatsapp_inbound_no_alert_when_same_booking_already_alerted(client):
+    payload = json.dumps(_inbound_payload(text="Спасибо!", msg_id="wamid.repeat1")).encode()
+    sig = _sign(payload, "test-app-secret")
+
+    with patch("app.Thread", _SyncThread), \
+         patch("app.db.is_duplicate_message", return_value=False), \
+         patch("app.bot.handle_message", return_value=_complete_booking_result()), \
+         patch("app.whatsapp.send_reply", return_value=True), \
+         patch("app.db.check_and_set_booking_alert", return_value=False), \
          patch("app.notify.send_owner_alert") as mock_notify:
 
         client.post(
@@ -201,16 +216,15 @@ def test_whatsapp_inbound_no_alert_when_booking_slots_incomplete(client):
 
 
 def test_whatsapp_inbound_sends_reply_even_if_owner_alert_fails(client):
-    import platforms.whatsapp as wa_module
-    wa_module._seen_message_ids.clear()
-
     payload = json.dumps(_inbound_payload(text="Айгуль, 5-7 июня, 2 человека", msg_id="wamid.fail1")).encode()
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
+         patch("app.db.is_duplicate_message", return_value=False), \
          patch("app.bot.handle_message", return_value=_complete_booking_result("Ваша бронь подтверждена.")), \
+         patch("app.db.check_and_set_booking_alert", return_value=True), \
          patch("app.notify.send_owner_alert", side_effect=Exception("network error")), \
-         patch("app.whatsapp.send_reply") as mock_send:
+         patch("app.whatsapp.send_reply", return_value=True) as mock_send:
 
         response = client.post(
             "/whatsapp/webhook",
@@ -224,17 +238,15 @@ def test_whatsapp_inbound_sends_reply_even_if_owner_alert_fails(client):
 
 
 def test_whatsapp_inbound_sends_escalation_alert_when_limit_exceeded(client):
-    import platforms.whatsapp as wa_module
-    wa_module._seen_message_ids.clear()
-
     payload = json.dumps(_inbound_payload(msg_id="wamid.esc1")).encode()
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
+         patch("app.db.is_duplicate_message", return_value=False), \
          patch("app.bot.handle_message", return_value=_bot_result(
              "Передаю администратору.", escalated=True
          )), \
-         patch("app.whatsapp.send_reply") as mock_send, \
+         patch("app.whatsapp.send_reply", return_value=True) as mock_send, \
          patch("app.notify.send_escalation_alert") as mock_escalate:
 
         response = client.post(
@@ -268,16 +280,14 @@ def test_whatsapp_inbound_returns_200_for_non_text_message(client):
 
 
 def test_whatsapp_inbound_caps_message_at_1000_chars(client):
-    import platforms.whatsapp as wa_module
-    wa_module._seen_message_ids.clear()
-
     long_text = "а" * 1500
     payload = json.dumps(_inbound_payload(text=long_text, msg_id="wamid.cap1")).encode()
     sig = _sign(payload, "test-app-secret")
 
     with patch("app.Thread", _SyncThread), \
+         patch("app.db.is_duplicate_message", return_value=False), \
          patch("app.bot.handle_message", return_value=_bot_result("reply")) as mock_bot, \
-         patch("app.whatsapp.send_reply"):
+         patch("app.whatsapp.send_reply", return_value=True):
         client.post("/whatsapp/webhook", data=payload,
                     content_type="application/json",
                     headers={"X-Hub-Signature-256": sig})
@@ -309,20 +319,21 @@ def test_health_deep_returns_503_when_supabase_fails(client):
 
 
 def test_whatsapp_inbound_deduplicates_retried_message(client):
-    import platforms.whatsapp as wa_module
-    wa_module._seen_message_ids.clear()
-
     payload = json.dumps(_inbound_payload(msg_id="wamid.dup1")).encode()
     sig = _sign(payload, "test-app-secret")
 
+    call_count = {"n": 0}
+    def fake_is_duplicate(message_id):
+        call_count["n"] += 1
+        return call_count["n"] > 1  # False first call, True second call
+
     with patch("app.Thread", _SyncThread), \
+         patch("app.db.is_duplicate_message", side_effect=fake_is_duplicate), \
          patch("app.bot.handle_message", return_value=_bot_result("reply")) as mock_bot, \
-         patch("app.whatsapp.send_reply"):
-        # First call — processes
+         patch("app.whatsapp.send_reply", return_value=True):
         client.post("/whatsapp/webhook", data=payload,
                     content_type="application/json",
                     headers={"X-Hub-Signature-256": sig})
-        # Second call with same message_id — should be deduped
         response = client.post("/whatsapp/webhook", data=payload,
                                content_type="application/json",
                                headers={"X-Hub-Signature-256": sig})

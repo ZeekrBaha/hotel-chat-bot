@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import logging
 import os
@@ -6,6 +7,11 @@ from threading import Thread
 from flask import Flask, request
 from core import bot, db, notify
 from platforms import whatsapp
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 REQUIRED_ENV = [
     "WHATSAPP_ACCESS_TOKEN",
@@ -19,7 +25,7 @@ REQUIRED_ENV = [
 ]
 
 for _key in REQUIRED_ENV:
-    if _key not in os.environ:
+    if not os.environ.get(_key):
         raise RuntimeError(f"Missing required environment variable: {_key}")
 
 app = Flask(__name__)
@@ -31,12 +37,16 @@ def _hash_phone(phone: str) -> str:
 
 
 def _booking_complete(result: dict) -> bool:
-    return all([
-        result.get("guest_name"),
-        result.get("check_in"),
-        result.get("check_out"),
-        result.get("num_guests"),
-    ])
+    try:
+        datetime.date.fromisoformat(result["check_in"])
+        datetime.date.fromisoformat(result["check_out"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    return (
+        bool(result.get("guest_name"))
+        and isinstance(result.get("num_guests"), int)
+        and result["num_guests"] > 0
+    )
 
 
 @app.get("/health")
@@ -71,7 +81,7 @@ def whatsapp_verify():
     return "Forbidden", 403
 
 
-def _process_whatsapp(payload: dict, phone: str, text: str, message_id: str) -> None:
+def _process_whatsapp(phone: str, text: str, message_id: str) -> None:
     text = text[:1000]
     t0 = time.monotonic()
     phone_hash = _hash_phone(phone)
@@ -84,15 +94,17 @@ def _process_whatsapp(payload: dict, phone: str, text: str, message_id: str) -> 
             except Exception:
                 _logger.exception("escalation_alert_failed phone=%s", phone_hash)
         elif _booking_complete(result):
-            try:
-                notify.send_owner_alert(phone, "whatsapp", {
-                    "guest_name": result["guest_name"],
-                    "check_in": result["check_in"],
-                    "check_out": result["check_out"],
-                    "num_guests": result["num_guests"],
-                })
-            except Exception:
-                _logger.exception("owner_alert_failed phone=%s", phone_hash)
+            booking = {
+                "guest_name": result["guest_name"],
+                "check_in": result["check_in"],
+                "check_out": result["check_out"],
+                "num_guests": result["num_guests"],
+            }
+            if db.check_and_set_booking_alert("whatsapp", phone, booking):
+                try:
+                    notify.send_owner_alert(phone, "whatsapp", booking)
+                except Exception:
+                    _logger.exception("owner_alert_failed phone=%s", phone_hash)
         latency_ms = int((time.monotonic() - t0) * 1000)
         _logger.info(
             "processed message_id=%s phone=%s booking=%s latency_ms=%d",
@@ -114,8 +126,8 @@ def whatsapp_inbound():
 
     phone, text, message_id = parsed
 
-    if whatsapp.is_duplicate(message_id):
+    if db.is_duplicate_message(message_id):
         return "", 200
 
-    Thread(target=_process_whatsapp, args=(request.json, phone, text, message_id), daemon=True).start()
+    Thread(target=_process_whatsapp, args=(phone, text, message_id), daemon=True).start()
     return "", 200

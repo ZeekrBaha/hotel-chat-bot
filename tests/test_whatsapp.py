@@ -1,8 +1,7 @@
 import hashlib
 import hmac as hmac_module
 from unittest.mock import patch
-from platforms.whatsapp import parse_inbound, verify_signature, send_reply, is_duplicate
-import platforms.whatsapp as wa_module
+from platforms.whatsapp import parse_inbound, verify_signature, send_reply
 
 # --- parse_inbound ---
 
@@ -69,10 +68,17 @@ def test_verify_signature_rejects_tampered_payload():
     assert verify_signature(b"tampered", sig, "test-app-secret") is False
 
 
+def test_verify_signature_rejects_empty_secret():
+    payload = b"data"
+    sig = _make_sig("", payload)
+    assert verify_signature(payload, sig, "") is False
+
+
 # --- send_reply ---
 
 def test_send_reply_posts_to_correct_endpoint():
     with patch("platforms.whatsapp.requests.post") as mock_post:
+        mock_post.return_value.ok = True
         send_reply("79991234567", "Добрый день!")
     url = mock_post.call_args.args[0]
     assert "123456789" in url   # WHATSAPP_PHONE_NUMBER_ID from conftest
@@ -80,6 +86,7 @@ def test_send_reply_posts_to_correct_endpoint():
 
 def test_send_reply_sends_correct_payload():
     with patch("platforms.whatsapp.requests.post") as mock_post:
+        mock_post.return_value.ok = True
         send_reply("79991234567", "Добрый день!")
     payload = mock_post.call_args.kwargs["json"]
     assert payload["to"] == "79991234567"
@@ -87,36 +94,30 @@ def test_send_reply_sends_correct_payload():
     assert payload["messaging_product"] == "whatsapp"
 
 
-def test_verify_signature_rejects_empty_secret():
-    payload = b"data"
-    sig = _make_sig("", payload)   # valid sig for empty secret
-    assert verify_signature(payload, sig, "") is False
-
-
 def test_send_reply_uses_timeout():
     with patch("platforms.whatsapp.requests.post") as mock_post:
+        mock_post.return_value.ok = True
         send_reply("79991234567", "Добрый день!")
     _, kwargs = mock_post.call_args
     assert kwargs.get("timeout") == (3, 10)
 
 
-# --- is_duplicate ---
-
-def test_is_duplicate_returns_false_first_time():
-    wa_module._seen_message_ids.clear()
-    assert is_duplicate("wamid.unique1") is False
-
-
-def test_is_duplicate_returns_true_second_time():
-    wa_module._seen_message_ids.clear()
-    is_duplicate("wamid.unique2")
-    assert is_duplicate("wamid.unique2") is True
+def test_send_reply_returns_true_on_success():
+    with patch("platforms.whatsapp.requests.post") as mock_post:
+        mock_post.return_value.ok = True
+        result = send_reply("79991234567", "Добрый день!")
+    assert result is True
 
 
-def test_is_duplicate_different_ids_not_duplicate():
-    wa_module._seen_message_ids.clear()
-    is_duplicate("wamid.a")
-    assert is_duplicate("wamid.b") is False
+def test_send_reply_returns_false_and_logs_on_http_error():
+    with patch("platforms.whatsapp.requests.post") as mock_post, \
+         patch("platforms.whatsapp._logger") as mock_logger:
+        mock_post.return_value.ok = False
+        mock_post.return_value.status_code = 400
+        mock_post.return_value.text = "Bad Request"
+        result = send_reply("79991234567", "Добрый день!")
+    assert result is False
+    mock_logger.error.assert_called_once()
 
 
 def test_parse_inbound_skips_group_message():

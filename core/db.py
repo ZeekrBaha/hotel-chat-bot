@@ -32,38 +32,51 @@ def get_history(platform: str, sender_id: str) -> list[dict]:
 
 
 def increment_daily_counter(platform: str, sender_id: str) -> int:
-    """Increment messages_today, resetting if the date has changed. Returns new count."""
-    today = datetime.date.today().isoformat()
-    client = get_client()
-    result = (
-        client.table("conversations")
-        .select("messages_today, counter_reset_at")
-        .eq("platform", platform)
-        .eq("sender_id", sender_id)
-        .execute()
-    )
-    if not result.data:
-        return 1  # row will be created by save_history; first message counts as 1
-    row = result.data[0]
-    reset_date = (row.get("counter_reset_at") or "")[:10]
-    if reset_date < today:
-        new_count = 1
-        client.table("conversations").update({
-            "messages_today": 1,
-            "counter_reset_at": f"{today}T00:00:00Z",
-        }).eq("platform", platform).eq("sender_id", sender_id).execute()
-    else:
-        new_count = (row.get("messages_today") or 0) + 1
-        client.table("conversations").update({
-            "messages_today": new_count,
-        }).eq("platform", platform).eq("sender_id", sender_id).execute()
-    return new_count
+    """Atomically increment via PostgreSQL RPC. Returns new count."""
+    result = get_client().rpc("increment_daily_counter", {
+        "p_platform": platform, "p_sender_id": sender_id,
+    }).execute()
+    return result.data if isinstance(result.data, int) else 1
 
 
 def save_history(platform: str, sender_id: str, messages: list[dict]) -> None:
     trimmed = messages[-MAX_HISTORY:]
-    client = get_client()
-    client.table("conversations").upsert(
-        {"platform": platform, "sender_id": sender_id, "messages": trimmed},
+    get_client().table("conversations").upsert(
+        {
+            "platform": platform,
+            "sender_id": sender_id,
+            "messages": trimmed,
+            "updated_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        },
         on_conflict="platform,sender_id",
     ).execute()
+
+
+def is_duplicate_message(message_id: str) -> bool:
+    """Returns True if already processed. Atomic INSERT ON CONFLICT via RPC."""
+    result = get_client().rpc(
+        "mark_message_processed", {"p_message_id": message_id}
+    ).execute()
+    return not result.data
+
+
+def check_and_set_booking_alert(platform: str, sender_id: str, booking: dict) -> bool:
+    """Returns True (and persists key) only if this booking tuple is new for this sender."""
+    key = (
+        f"{booking.get('guest_name')}|{booking.get('check_in')}"
+        f"|{booking.get('check_out')}|{booking.get('num_guests')}"
+    )
+    client = get_client()
+    result = (
+        client.table("conversations")
+        .select("last_alerted_booking_key")
+        .eq("platform", platform)
+        .eq("sender_id", sender_id)
+        .execute()
+    )
+    if result.data and result.data[0].get("last_alerted_booking_key") == key:
+        return False
+    client.table("conversations").update(
+        {"last_alerted_booking_key": key}
+    ).eq("platform", platform).eq("sender_id", sender_id).execute()
+    return True

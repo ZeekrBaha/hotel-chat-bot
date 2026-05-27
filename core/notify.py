@@ -32,7 +32,10 @@ def send_owner_alert(sender_id: str, platform: str, booking: dict) -> None:
         timeout=(3, 10),
     )
     response.raise_for_status()
-    payload = response.json()
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
     if payload.get("error"):
         raise RuntimeError(f"Meta API error: {payload['error']}")
 
@@ -60,6 +63,9 @@ def send_escalation_alert(sender_id: str, platform: str) -> None:
         timeout=(3, 10),
     )
     response.raise_for_status()
-    payload = response.json()
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
     if payload.get("error"):
         raise RuntimeError(f"Meta API error: {payload['error']}")

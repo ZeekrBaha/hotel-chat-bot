@@ -6,6 +6,7 @@ After=network.target
 User=hotelbot
 WorkingDirectory=/home/hotelbot/hotel-chat-bot
 EnvironmentFile=/home/hotelbot/hotel-chat-bot/.env
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/home/hotelbot/hotel-chat-bot/venv/bin/gunicorn \
     --workers 4 \
     --worker-class gthread \
@@ -16,6 +17,7 @@ ExecStart=/home/hotelbot/hotel-chat-bot/venv/bin/gunicorn \
     app:app
 Restart=always
 RestartSec=5
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
