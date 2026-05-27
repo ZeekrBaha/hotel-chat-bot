@@ -1,0 +1,19 @@
+[Unit]
+Description=Hotel Chat Bot
+After=network.target
+
+[Service]
+User=hotelbot
+WorkingDirectory=/home/hotelbot/hotel-chat-bot
+EnvironmentFile=/home/hotelbot/hotel-chat-bot/.env
+ExecStart=/home/hotelbot/hotel-chat-bot/venv/bin/gunicorn \
+    --workers 2 \
+    --bind 127.0.0.1:8000 \
+    --access-logfile - \
+    --error-logfile - \
+    app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
