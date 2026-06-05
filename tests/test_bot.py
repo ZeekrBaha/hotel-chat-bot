@@ -281,3 +281,33 @@ def test_handle_message_passes_last_10_messages_to_openai():
     assert len(sent_messages) == 11
     assert sent_messages[-1]["content"] == "Новое сообщение"
     assert sent_messages[1]["content"] == "6"
+
+
+# --- language routing (code-side detection -> explicit directive) ---
+
+def test_detect_language():
+    from core.bot import detect_language
+    assert detect_language("Баасы канча, бөлмө бармы?") == "ky"
+    assert detect_language("Сколько стоит номер?") == "ru"
+    assert detect_language("hello there") == "unknown"
+
+
+def _system_content_for(message_text: str) -> str:
+    mock_openai = MagicMock()
+    mock_openai.chat.completions.create.return_value = _mock_structured_response(FAKE_REPLY, False)
+    with patch("core.bot.get_system_prompt", return_value=FAKE_PROMPT), \
+         patch("core.bot.db.get_history", return_value=[]), \
+         patch("core.bot.db.append_conversation_turn"), \
+         patch("core.bot.db.increment_daily_counter", return_value=1), \
+         patch("core.bot._get_openai_client", return_value=mock_openai), \
+         patch("core.bot._today", return_value="27.05.2026"):
+        handle_message("whatsapp", "79991234567", message_text)
+    return mock_openai.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+
+def test_handle_message_injects_kyrgyz_directive():
+    assert "КЫРГЫЗСКОМ" in _system_content_for("Баасы канча?")
+
+
+def test_handle_message_injects_russian_directive():
+    assert "РУССКОМ" in _system_content_for("Сколько стоит номер?")
