@@ -74,3 +74,39 @@ def test_send_owner_alert_raises_on_meta_api_error_in_body():
         })
         with pytest.raises(RuntimeError, match="Meta API error"):
             send_owner_alert("79991234567", "whatsapp", BOOKING)
+
+
+# --- WhatsApp template path (works outside Meta's 24h window) ---
+
+def test_send_owner_alert_uses_template_when_configured(monkeypatch):
+    monkeypatch.setenv("OWNER_ALERT_TEMPLATE", "owner_booking_alert")
+    monkeypatch.setenv("WHATSAPP_TEMPLATE_LANG", "ru")
+    with patch("core.notify.requests.post") as mock_post:
+        _mock_post_setup(mock_post)
+        send_owner_alert("79991234567", "whatsapp", BOOKING)
+    body = mock_post.call_args.kwargs["json"]
+    assert body["type"] == "template"
+    assert body["template"]["name"] == "owner_booking_alert"
+    assert body["template"]["language"]["code"] == "ru"
+    params = [p["text"] for p in body["template"]["components"][0]["parameters"]]
+    assert params == ["Айгуль", "05.06.2026", "07.06.2026", "2", "whatsapp", "79991234567"]
+
+
+def test_send_escalation_alert_uses_template_when_configured(monkeypatch):
+    monkeypatch.setenv("ESCALATION_ALERT_TEMPLATE", "owner_escalation_alert")
+    with patch("core.notify.requests.post") as mock_post:
+        _mock_post_setup(mock_post)
+        send_escalation_alert("79991234567", "whatsapp")
+    body = mock_post.call_args.kwargs["json"]
+    assert body["type"] == "template"
+    assert body["template"]["name"] == "owner_escalation_alert"
+    params = [p["text"] for p in body["template"]["components"][0]["parameters"]]
+    assert params == ["whatsapp", "79991234567"]
+
+
+def test_send_owner_alert_falls_back_to_text_without_template():
+    """No template env -> free-form text (the existing 24h-window behaviour)."""
+    with patch("core.notify.requests.post") as mock_post:
+        _mock_post_setup(mock_post)
+        send_owner_alert("79991234567", "whatsapp", BOOKING)
+    assert mock_post.call_args.kwargs["json"]["type"] == "text"

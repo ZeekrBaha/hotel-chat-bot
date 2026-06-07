@@ -13,6 +13,11 @@ SELECT cron.schedule(
   '0 3 * * *',
   $$
     DELETE FROM conversations WHERE updated_at < NOW() - INTERVAL '90 days';
-    DELETE FROM processed_messages WHERE processed_at < NOW() - INTERVAL '7 days';
+    -- Queue rows double as the dedup guard, so keep them long enough that Meta
+    -- retries can no longer arrive (7 days), then drop terminal jobs + their events.
+    DELETE FROM message_jobs
+      WHERE status IN ('replied', 'dead')
+        AND updated_at < NOW() - INTERVAL '7 days';
+    DELETE FROM message_events WHERE created_at < NOW() - INTERVAL '30 days';
   $$
 );
