@@ -10,6 +10,19 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -27,4 +40,8 @@ jobs:
         run: ruff check . --output-format=github
 
       - name: Run tests
+        env:
+          # Integration tests (tests/integration) exercise the real plpgsql RPCs
+          # against this Postgres service. Unit tests ignore it.
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: pytest -q

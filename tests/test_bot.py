@@ -185,7 +185,9 @@ def test_handle_message_injects_todays_date_in_system_prompt():
     assert FAKE_PROMPT in system_content
 
 
-def test_handle_message_appends_user_and_assistant_to_history():
+def test_handle_message_does_not_append_history():
+    """History is persisted by the worker AFTER the reply is delivered, not here —
+    so a failed send never leaves history claiming the bot replied."""
     mock_openai = MagicMock()
     mock_openai.chat.completions.create.return_value = _mock_structured_response(FAKE_REPLY, False)
 
@@ -196,16 +198,18 @@ def test_handle_message_appends_user_and_assistant_to_history():
          patch("core.bot._get_openai_client", return_value=mock_openai), \
          patch("core.bot._today", return_value="27.05.2026"):
 
-        handle_message("whatsapp", "79991234567", "Здравствуйте")
+        result = handle_message("whatsapp", "79991234567", "Здравствуйте")
 
-    assert mock_append.call_count == 1
-    call_args = mock_append.call_args[0]
-    assert call_args[0] == "whatsapp"
-    assert call_args[1] == "79991234567"
-    assert call_args[2] == [
-        {"role": "user", "content": "Здравствуйте"},
-        {"role": "assistant", "content": FAKE_REPLY},
-    ]
+    mock_append.assert_not_called()
+    assert result["persist_history"] is True
+
+
+def test_check_openai_health_lists_models():
+    mock_openai = MagicMock()
+    with patch("core.bot._get_openai_client", return_value=mock_openai):
+        import core.bot as bot_module
+        bot_module.check_openai_health()
+    mock_openai.models.list.assert_called_once()
 
 
 def test_handle_message_returns_escalation_when_daily_limit_exceeded():

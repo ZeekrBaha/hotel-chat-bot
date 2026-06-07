@@ -57,6 +57,14 @@ def _get_openai_client() -> OpenAI:
     return _openai_client
 
 
+def check_openai_health() -> None:
+    """Real readiness probe: a lightweight authenticated call to OpenAI.
+
+    Raises if the API is unreachable or the key is invalid.
+    """
+    _get_openai_client().models.list()
+
+
 @functools.lru_cache(maxsize=1)
 def get_system_prompt() -> str:
     path = os.environ.get("SYSTEM_PROMPT_PATH", "system-prompt.txt")
@@ -110,6 +118,7 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
             "reply": ESCALATION_REPLY,
             "is_booking_intent": False,
             "escalated": daily_count == DAILY_MESSAGE_LIMIT + 1,
+            "persist_history": False,
             **_null_booking(),
         }
 
@@ -151,11 +160,9 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
     else:
         booking_intent = is_booking_intent(message_text)
 
-    db.append_conversation_turn(platform, sender_id, [
-        {"role": "user", "content": message_text},
-        {"role": "assistant", "content": reply},
-    ])
-
+    # History is NOT appended here. The worker appends it only after the reply is
+    # actually delivered, so a failed send never leaves history claiming the bot
+    # replied when the guest received nothing.
     return {
         "reply": reply,
         "is_booking_intent": booking_intent,
@@ -164,4 +171,5 @@ def handle_message(platform: str, sender_id: str, message_text: str) -> dict:
         "check_out": parsed.get("check_out"),
         "num_guests": parsed.get("num_guests"),
         "escalated": False,
+        "persist_history": True,
     }

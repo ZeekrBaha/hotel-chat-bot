@@ -1,0 +1,20 @@
+[Unit]
+Description=Hotel Chat Bot — queue worker
+After=network.target
+
+[Service]
+User=hotelbot
+WorkingDirectory=/home/hotelbot/hotel-chat-bot
+EnvironmentFile=/home/hotelbot/hotel-chat-bot/.env
+Environment="PYTHONUNBUFFERED=1"
+# Drains the message_jobs queue. The web service (hotel-chat-bot.service) only
+# enqueues; this process does all OpenAI / WhatsApp / Supabase work, so failures
+# retry instead of dropping messages. WORKER_CONCURRENCY bounds parallelism.
+ExecStart=/home/hotelbot/hotel-chat-bot/venv/bin/python -m core.worker
+Restart=always
+RestartSec=5
+# Give in-flight jobs time to finish on SIGTERM (the worker drains on signal).
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

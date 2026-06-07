@@ -1,13 +1,7 @@
-import datetime
-import hashlib
 import logging
 import os
-import signal
-import time
-import threading
-from threading import Thread
 from flask import Flask, request
-from core import bot, db, notify
+from core import bot, db
 from platforms import whatsapp
 
 logging.basicConfig(
@@ -31,63 +25,42 @@ for _key in REQUIRED_ENV:
     if not os.environ.get(_key):
         raise RuntimeError(f"Missing required environment variable: {_key}")
 
+MAX_MESSAGE_LEN = 1000
+
 app = Flask(__name__)
 _logger = logging.getLogger(__name__)
-
-_inflight: set[threading.Thread] = set()
-_inflight_lock = threading.Lock()
-# Capture gunicorn's original SIGTERM handler at import time.
-# Assumes gunicorn --worker-class gthread (which initializes signals before importing WSGI app).
-# This coupling only works for gthread; sync/eventlet/uvicorn workers may behave differently.
-_orig_sigterm = signal.getsignal(signal.SIGTERM)
-
-
-def _graceful_exit(signum, frame):
-    _logger.info("SIGTERM received, waiting for %d in-flight requests...", len(_inflight))
-    with _inflight_lock:
-        inflight_copy = list(_inflight)
-    for t in inflight_copy:
-        t.join(timeout=15)
-    _logger.info("graceful_exit complete")
-    if callable(_orig_sigterm):
-        _orig_sigterm(signum, frame)
-
-
-signal.signal(signal.SIGTERM, _graceful_exit)
-
-
-def _hash_phone(phone: str) -> str:
-    return hashlib.sha256(phone.encode()).hexdigest()[:8]
-
-
-def _booking_complete(result: dict) -> bool:
-    try:
-        datetime.date.fromisoformat(result["check_in"])
-        datetime.date.fromisoformat(result["check_out"])
-    except (TypeError, ValueError, KeyError):
-        return False
-    return (
-        bool(result.get("guest_name"))
-        and isinstance(result.get("num_guests"), int)
-        and result["num_guests"] > 0
-    )
 
 
 @app.get("/health")
 def health():
+    """Liveness: the process is up. Cheap — safe for frequent probes."""
     return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready():
+    """Readiness: can we serve traffic? Checks Supabase (a single indexed query)
+    but NOT OpenAI, so load balancers can probe this often without hitting the
+    OpenAI API. Use /health/deep for full diagnostics."""
+    try:
+        db.check_health()
+    except Exception as e:
+        return {"status": "not_ready", "checks": {"supabase": f"error: {e}"}}, 503
+    return {"status": "ready", "checks": {"supabase": "ok"}}
 
 
 @app.get("/health/deep")
 def health_deep():
+    """Full diagnostics with REAL reachability checks, including a live OpenAI
+    call. Heavier — for humans / monitoring, not for per-request LB probes."""
     checks = {}
     try:
-        db.get_client()
+        db.check_health()
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = f"error: {e}"
     try:
-        bot._get_openai_client()
+        bot.check_openai_health()
         checks["openai"] = "ok"
     except Exception as e:
         checks["openai"] = f"error: {e}"
@@ -105,46 +78,6 @@ def whatsapp_verify():
     return "Forbidden", 403
 
 
-def _process_whatsapp(phone: str, text: str, message_id: str) -> None:
-    text = text[:1000]
-    t0 = time.monotonic()
-    phone_hash = _hash_phone(phone)
-    current_thread = threading.current_thread()
-    try:
-        result = bot.handle_message("whatsapp", phone, text)
-        send_ok = whatsapp.send_reply(phone, result["reply"])
-        if not send_ok:
-            _logger.error("reply_undelivered phone=%s message_id=%s", phone_hash, message_id)
-            return
-        if result.get("escalated"):
-            try:
-                notify.send_escalation_alert(phone, "whatsapp")
-            except Exception:
-                _logger.exception("escalation_alert_failed phone=%s", phone_hash)
-        elif _booking_complete(result):
-            booking = {
-                "guest_name": result["guest_name"],
-                "check_in": result["check_in"],
-                "check_out": result["check_out"],
-                "num_guests": result["num_guests"],
-            }
-            if db.check_and_set_booking_alert("whatsapp", phone, booking):
-                try:
-                    notify.send_owner_alert(phone, "whatsapp", booking)
-                except Exception:
-                    _logger.exception("owner_alert_failed phone=%s", phone_hash)
-        latency_ms = int((time.monotonic() - t0) * 1000)
-        _logger.info(
-            "processed message_id=%s phone=%s booking=%s latency_ms=%d",
-            message_id, phone_hash, result["is_booking_intent"], latency_ms,
-        )
-    except Exception:
-        _logger.exception("process_error phone=%s message_id=%s", phone_hash, message_id)
-    finally:
-        with _inflight_lock:
-            _inflight.discard(current_thread)
-
-
 @app.post("/whatsapp/webhook")
 def whatsapp_inbound():
     sig = request.headers.get("X-Hub-Signature-256", "")
@@ -156,12 +89,18 @@ def whatsapp_inbound():
         return "", 200
 
     phone, text, message_id = parsed
+    text = text[:MAX_MESSAGE_LEN]
 
-    if db.is_duplicate_message(message_id):
-        return "", 200
+    # Only enqueue. A separate worker (python -m core.worker) does the real work,
+    # so a failed OpenAI/WhatsApp/Supabase call retries instead of dropping the
+    # message. enqueue_message dedups Meta retries atomically (returns False).
+    try:
+        enqueued = db.enqueue_message(message_id, "whatsapp", phone, text)
+    except Exception:
+        _logger.exception("enqueue_failed message_id=%s", message_id)
+        # 500 -> Meta retries the webhook, so the message is not lost.
+        return "", 500
 
-    t = Thread(target=_process_whatsapp, args=(phone, text, message_id), daemon=False)
-    with _inflight_lock:
-        _inflight.add(t)
-    t.start()
+    if not enqueued:
+        _logger.info("duplicate_message_ignored message_id=%s", message_id)
     return "", 200
